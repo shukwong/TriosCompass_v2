@@ -1,0 +1,7 @@
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.11
+  - igv-reports=1.17.0
+  - pysam=0.23.3
