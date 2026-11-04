@@ -1,3 +1,12 @@
+def _gatk_java_heap_mb(wildcards, resources):
+    mem_mb = int(getattr(resources, "mem_mb", 16000))
+    if mem_mb < 512:
+        raise ValueError("gatk_combine_gvcf requires at least 512 MB of memory")
+    # Reserve memory for the JVM and native libraries, including small jobs.
+    reserve_mb = min(4096, max(256, mem_mb // 5))
+    return mem_mb - reserve_mb
+
+
 rule gatkhc_pb:
     input:
         bam=get_bam_by_subj,
@@ -8,6 +17,8 @@ rule gatkhc_pb:
         gz=output_dir +"/gatkhc_pb/{subj}.gatk.g.vcf.gz",
         tbi=output_dir +"/gatkhc_pb/{subj}.gatk.g.vcf.gz.tbi"
     threads: config["threads"]["gatkhc_pb"]
+    resources:
+        gpu=1
     conda: "../envs/tabix.yaml"
     params: 
         singularity_cmd = config["parabricks"]["singularity_cmd"]
@@ -32,14 +43,21 @@ rule gatk_combine_gvcf:
         fai=genome_fai,
     output: output_dir+"/gatk_combine_gvcf/{fam}.combine_gvcf.g.vcf.gz"
     threads: config["threads"]["gatk_combine_gvcf"]
+    resources:
+        mem_mb=16000
     conda: "../envs/gatk4.yaml"
     benchmark:
         output_dir + "/benchmark/gatk_combine_gvcf/{fam}.tsv"
     params: 
         v=lambda w, input: " -V ".join(input.vcfs),
-        adjusted_mem=lambda wildcards, resources: int((resources.mem_mb / 1024) - 4)
+        java_heap_mb=_gatk_java_heap_mb
     shell: """
-        gatk --java-options "-Xmx{params.adjusted_mem}G" CombineGVCFs \
+        unset JAVA_TOOL_OPTIONS _JAVA_OPTIONS JDK_JAVA_OPTIONS
+        : "${{CONDA_PREFIX:?The GATK Conda environment must be activated}}"
+        export PATH="$CONDA_PREFIX/bin:$PATH"
+        export JAVA_HOME="$CONDA_PREFIX"
+        hash -r
+        "$CONDA_PREFIX/bin/gatk" --java-options "-Xmx{params.java_heap_mb}m" CombineGVCFs \
             -V {params.v} \
             -R {input.ref} \
             -O {output} 
@@ -53,6 +71,8 @@ rule gatk_genotype_gvcf_pb:
         vcf=output_dir+"/gatk_genotype_gvcf_pb/{fam}.genotype_gvcf.g.vcf",
         gz=output_dir+"/gatk_genotype_gvcf_pb/{fam}.genotype_gvcf.g.vcf.gz",
     threads: config["threads"]["gatk_genotype_gvcf_pb"]
+    resources:
+        gpu=1
     conda: "../envs/tabix.yaml"
     benchmark:
         output_dir + "/benchmark/gatk_genotype_gvcf_pb/{fam}.tsv"
@@ -110,6 +130,6 @@ else:
             output_dir + "/benchmark/gatk_cgp/{fam}.tsv"
         resources: 
         shell: """
-            bcftools norm -f {input.ref} -m -  {output.gvcf} | bcftools view -i'ALT!="*"' -Oz -o {output.vcf}
+            bcftools norm -f {input.ref} -m -  {input.gvcf} | bcftools view -i'ALT!="*"' -Oz -o {output.vcf}
             tabix -p vcf {output.vcf}
         """

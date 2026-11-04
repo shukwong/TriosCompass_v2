@@ -21,17 +21,42 @@ rule hipstr:
         reg = output_dir+"/splitted_panel/hipstr_{chunk}.bed"
     output:
         vcf= output_dir + "/hipstr/{chunk}.vcf.gz",
+        vcf_index= output_dir + "/hipstr/{chunk}.vcf.gz.tbi",
         viz= output_dir + "/hipstr/{chunk}.aln.viz.gz",
+        viz_index= output_dir + "/hipstr/{chunk}.aln.viz.gz.tbi",
     log: output_dir + "/hipstr/{chunk}.log"
     benchmark:
         output_dir + "/benchmark/hipstr/{chunk}.tsv"
-    singularity: "docker://cgrlab/hipstr:latest"
+    singularity: config.get("containers", {}).get("hipstr", "docker://cgrlab/hipstr:latest")
     params: 
         bams=lambda w, input: ",".join(input.bams)
     shell: """
-        HipSTR  --output-gls --bams {params.bams} --fasta {input.ref}  --regions  {input.reg} --str-vcf  {output.vcf} --viz-out {output.viz} --def-stutter-model  --log  {log}
-        tabix -p bed {output.viz}
-        tabix -p vcf {output.vcf}
+        output_parent=$(dirname {output.vcf:q})
+        log_path={log:q}
+        mkdir -p "$output_parent" "$(dirname "$log_path")"
+        tmpdir=$(mktemp -d "$output_parent/.tmp.XXXXXX")
+        hipstr_cleanup() {{
+            rc=$?
+            if [ -f "$tmpdir/hipstr.log" ]; then
+                cp -- "$tmpdir/hipstr.log" "$log_path" || true
+            fi
+            rm -rf -- "$tmpdir" || true
+            exit "$rc"
+        }}
+        trap hipstr_cleanup EXIT
+        trap 'exit 130' INT
+        trap 'exit 143' TERM
+
+        HipSTR --output-gls --bams {params.bams:q} --fasta {input.ref:q} \
+            --regions {input.reg:q} --str-vcf "$tmpdir/calls.vcf.gz" \
+            --viz-out "$tmpdir/alignments.aln.viz.gz" --def-stutter-model \
+            --log "$tmpdir/hipstr.log"
+        tabix -p bed "$tmpdir/alignments.aln.viz.gz"
+        tabix -p vcf "$tmpdir/calls.vcf.gz"
+        mv -- "$tmpdir/calls.vcf.gz" {output.vcf:q}
+        mv -- "$tmpdir/calls.vcf.gz.tbi" {output.vcf_index:q}
+        mv -- "$tmpdir/alignments.aln.viz.gz" {output.viz:q}
+        mv -- "$tmpdir/alignments.aln.viz.gz.tbi" {output.viz_index:q}
     """
 
 ########################################################
@@ -69,17 +94,42 @@ rule hipstr_recall:
         reg = output_dir + "/vizaln/{fam}/{fam}_recall.hipstr.bed"
     output:
         vcf = output_dir + "/vizaln/{fam}/{fam}.hipstr.vcf.gz",
-        viz = output_dir + "/vizaln/{fam}/{fam}.hipstr.aln.viz.gz"
+        vcf_index = output_dir + "/vizaln/{fam}/{fam}.hipstr.vcf.gz.tbi",
+        viz = output_dir + "/vizaln/{fam}/{fam}.hipstr.aln.viz.gz",
+        viz_index = output_dir + "/vizaln/{fam}/{fam}.hipstr.aln.viz.gz.tbi"
     log: output_dir + "/vizaln/{fam}/{fam}.hipstr.hipstr.log"
     params:
         bams=lambda w, input: ",".join(input.bams)
-    singularity: "docker://cgrlab/hipstr:latest"
+    singularity: config.get("containers", {}).get("hipstr", "docker://cgrlab/hipstr:latest")
     benchmark:
         output_dir +"/benchmark/hipstr_recall/{fam}_hipstr.tsv"
     shell: """
-        HipSTR  --output-gls --bams  {params.bams} --fasta {input.ref} --regions  {input.reg} --str-vcf  {output.vcf} --viz-out {output.viz} --def-stutter-model  --min-reads 6 --log  {log}
-        tabix -p bed {output.viz}
-        tabix -p vcf {output.vcf}
+        output_parent=$(dirname {output.vcf:q})
+        log_path={log:q}
+        mkdir -p "$output_parent" "$(dirname "$log_path")"
+        tmpdir=$(mktemp -d "$output_parent/.tmp.XXXXXX")
+        hipstr_cleanup() {{
+            rc=$?
+            if [ -f "$tmpdir/hipstr.log" ]; then
+                cp -- "$tmpdir/hipstr.log" "$log_path" || true
+            fi
+            rm -rf -- "$tmpdir" || true
+            exit "$rc"
+        }}
+        trap hipstr_cleanup EXIT
+        trap 'exit 130' INT
+        trap 'exit 143' TERM
+
+        HipSTR --output-gls --bams {params.bams:q} --fasta {input.ref:q} \
+            --regions {input.reg:q} --str-vcf "$tmpdir/calls.vcf.gz" \
+            --viz-out "$tmpdir/alignments.aln.viz.gz" --def-stutter-model --min-reads 6 \
+            --log "$tmpdir/hipstr.log"
+        tabix -p bed "$tmpdir/alignments.aln.viz.gz"
+        tabix -p vcf "$tmpdir/calls.vcf.gz"
+        mv -- "$tmpdir/calls.vcf.gz" {output.vcf:q}
+        mv -- "$tmpdir/calls.vcf.gz.tbi" {output.vcf_index:q}
+        mv -- "$tmpdir/alignments.aln.viz.gz" {output.viz:q}
+        mv -- "$tmpdir/alignments.aln.viz.gz.tbi" {output.viz_index:q}
     """
 
 checkpoint scatter_chr_pos:
@@ -119,7 +169,7 @@ rule vizaln:
         )
     benchmark:
         output_dir +"/benchmark/vizaln/{fam}_hipstr.{chr}_{pos}.tsv"
-    singularity: "docker://cgrlab/hipstr:latest"
+    singularity: config.get("containers", {}).get("hipstr", "docker://cgrlab/hipstr:latest")
     shell: """
         VizAln_rev {input.viz} {output} {wildcards.chr} {wildcards.pos}
     """

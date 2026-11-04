@@ -1,7 +1,9 @@
 channels:
-  - bioconda
   - conda-forge
+  - bioconda
 dependencies:
+  - python=3.10
+  - pip
+  - scipy==1.11.4
+  - libdeflate<1.25
   - trtools ==5.0.2
-  - pip:
-    - scipy==1.11.4

@@ -13,9 +13,12 @@ rule fq2bam:
         idx=rules.bwa_index.output
     output: output_dir + "/fq2bam/{SAMPLE_ID}.bam"
     threads: config["threads"]["fq2bam"]
+    resources:
+       gpu=1
     params: 
        fqs=lambda w, input: " --in-fq ".join([r1+' '+r2+' ' + rg for r1,r2, rg in zip(input.R1s, input.R2s, ["'@RG\\tPL:ILLUMINA\\tID:{FLOWCELL}_{LANE}\\tSM:{SAMPLE_ID}\\tPU:{SAMPLE_ID}_{FLOWCELL}_{LANE}\\tLB:{SAMPLE_ID}_{INDEX}'" .format (**samples.loc[id]) for id in list(compress(ids, [ id == w.SAMPLE_ID for id in samples['SAMPLE_ID']]))  ])]),
-       singularity_cmd = config["parabricks"]["singularity_cmd"]
+       singularity_cmd = config["parabricks"]["singularity_cmd"],
+       fq2bam_extra = config["parabricks"].get("fq2bam_extra", "")
     benchmark: 
         output_dir + "/benchmark/fq2bam/{SAMPLE_ID}.tsv"
     shell: """
@@ -23,7 +26,8 @@ rule fq2bam:
         pbrun fq2bam \
             --ref {input.ref} \
             --in-fq {params.fqs} \
-            --out-bam {output} 
+            --out-bam {output} \
+            {params.fq2bam_extra}
     """
 
 def get_bam(subj):
