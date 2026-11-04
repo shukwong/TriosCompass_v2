@@ -6,6 +6,7 @@ channels:
 dependencies:
   - snakemake==7.32.4
   - pulp<2.8
+  - setuptools==69.1.1  # Snakemake 7 min_version needs pkg_resources
   - snakemake-wrapper-utils
   - pip==22.3.1
   - python=3.11

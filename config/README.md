@@ -279,7 +279,8 @@ artifacts, not independent validation of germline de novo status.
 ### Runtime changes and Biowulf
 
 The main environment now matches the validated Snakemake 7.32.4/Python 3.11
-runtime, with `pulp<2.8` for Snakemake 7 compatibility and Peppy 0.40.4.
+runtime, with `pulp<2.8` and `setuptools==69.1.1` for Snakemake 7 compatibility
+(including its `pkg_resources` version check), and Peppy 0.40.4.
 TRTools retains 5.0.2 with Python 3.10,
 SciPy 1.11.4 and `libdeflate<1.25`. FastQC defaults to the reference's
 `v1.3.2/bio/fastqc` wrapper and four threads; override
