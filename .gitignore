@@ -4,3 +4,10 @@ logs/**
 .snakemake
 .snakemake/**
 docs/** 
+
+# Generated analysis artifacts and local runtimes
+__pycache__/
+*.py[cod]
+.pytest_cache/
+output/
+MultiQC_output/

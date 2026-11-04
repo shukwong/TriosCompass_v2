@@ -48,14 +48,17 @@ if config["dnSV"]["enable"]:
     if config["dnSV"]["Manta"]["enable"]:
         include: "rules/dnSV_manta.smk"
 
+if config.get("rufus", {}).get("enable", False):
+    include: "rules/dnSV_rufus.smk"
+
+if config.get("igv_reports", {}).get("enable", False):
+    include: "rules/igv_reports.smk"
+
 if config["multiqc"]["enable"]:
     include: "rules/multiqc.smk"
 
-rule all: 
-    input: 
+rule all:
+    default_target: True
+    input:
         output_dir + "/dnm_vcf_summary/DNM_summary.txt",
-        optional_output=optional_output,
-        
-        
-
-
+        optional_output=optional_output

@@ -1,5 +1,7 @@
 # call de novo SV using manta+GraphTyper2 and smoove
-EXCLUDE_BED=config["dnSV"]["GraphTyper2+smoove"]["exclude_bed"]
+EXCLUDE_BED = config["dnSV"].get("exclude_bed") or config["dnSV"].get("GraphTyper2+smoove", {}).get("exclude_bed")
+if not EXCLUDE_BED:
+    raise ValueError("Set dnSV.exclude_bed (or the legacy GraphTyper2+smoove.exclude_bed)")
 SV_CALLERS=["smoove", "gt2"]
 
 rule manta_create_run_script:
@@ -11,7 +13,7 @@ rule manta_create_run_script:
         output_dir + '/manta/{subj}/runWorkflow.py.config.pickle'
     params:
         prefix = output_dir + '/manta/{subj}'
-    singularity: 'docker://szarate/manta:v1.6.0'
+    singularity: config.get("containers", {}).get("manta", "docker://szarate/manta:v1.6.0")
     shell:
         'configManta.py \
             --bam {input.bam} \
@@ -29,7 +31,7 @@ rule manta_call:
     threads: config["threads"]["manta_call"]
     benchmark:
         "benchmarks/manta_call/{sample}.tsv"
-    singularity: 'docker://szarate/manta:v1.6.0'
+    singularity: config.get("containers", {}).get("manta", "docker://szarate/manta:v1.6.0")
     shell:
         '{input.cmd} -m local -j {threads}'
 

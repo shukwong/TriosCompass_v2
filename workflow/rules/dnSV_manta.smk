@@ -7,10 +7,11 @@ rule config_manta_joint_call:
         output_dir + '/manta_joint/{fam}/runWorkflow.py.config.pickle'
     params:
         prefix = output_dir + '/manta_joint/{fam}',
-        bams = lambda w, input: " --bam ".join(input.bams)
-    singularity: 'docker://kfdrc/manta:1.6.0'
+        bams = lambda w, input: " --bam ".join(input.bams),
+        config_command = config["dnSV"]["Manta"].get("config_command", "/manta-1.6.0.centos6_x86_64/bin/configManta.py")
+    singularity: config.get("containers", {}).get("manta_joint", "docker://kfdrc/manta:1.6.0")
     shell:
-        '/manta-1.6.0.centos6_x86_64/bin/configManta.py \
+        '{params.config_command:q} \
             --bam {params.bams} \
             --referenceFasta {input.ref} \
             --runDir {params.prefix}'
@@ -26,7 +27,7 @@ rule run_manta_joint_call:
     threads: config["threads"]["manta_call"]
     benchmark:
         "benchmarks/run_manta_joint_call/{fam}.tsv"
-    singularity: 'docker://kfdrc/manta:1.6.0'
+    singularity: config.get("containers", {}).get("manta_joint", "docker://kfdrc/manta:1.6.0")
     shell:
         '{input.cmd} -m local -j {threads}'
 

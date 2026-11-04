@@ -1,0 +1,4 @@
+SAMPLE_ID,FLOWCELL,INDEX,LANE,LIBRARY_ID,R1,R2
+child,FC1,ACGT,1,LIB1,input/child_R1.fastq.gz,input/child_R2.fastq.gz
+father,FC1,TGCA,2,LIB2,input/father_R1.fastq.gz,input/father_R2.fastq.gz
+mother,FC1,GTAC,3,LIB3,input/mother_R1.fastq.gz,input/mother_R2.fastq.gz

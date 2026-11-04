@@ -1,0 +1,144 @@
+# Portable defaults; override sample/reference paths with --configfile.
+# Optional new analyses remain disabled until explicitly enabled.
+name: example_trio
+pepfile: config/example_bam_pep.yaml
+pepschema: ../schemas/rerf_fastq_schema.yaml
+output_dir: output
+ref:
+  sequence: ref/Homo_sapiens_assembly38.fasta
+  build: hg38
+ped_dir: config/example_ped
+parabricks:
+  singularity_cmd: apptainer exec --nv --bind /data,/fdb,/lscratch docker://nvcr.io/nvidia/clara/clara-parabricks:4.3.1-1
+  fq2bam_extra: --num-gpus 1 --low-memory
+fastq_input:
+  enable: false
+  fastqc:
+    enable: true
+    wrapper: v1.3.2/bio/fastqc
+    threads: 4
+bam_input:
+  reset_RG: false
+bam_qc:
+  flagstat:
+    enable: true
+  collectwgsmetrics:
+    enable: true
+  collectmultiplemetrics:
+    enable: true
+    mode: seq_artifact
+  telomerecat:
+    enable: false
+    threads: 2
+    mem_mb: 16000
+    runtime_minutes: 720
+    executable: telomerecat
+  bam2bam:
+    enable: false
+    threads: 4
+    mem_mb: 16000
+    runtime_minutes: 720
+deepvariant:
+  glnexus_config: DeepVariant_unfiltered
+gatk_hc:
+  gatk_hard_filter:
+    enable: true
+    filter: QD>=2 & FS<=60 & SOR<4 & MQ>38 & MQRankSum>= -12.5 & ReadPosRankSum >=
+      -8
+call_dnm:
+  interval: ref/hg38.wgs_interval.bed
+  max_err: 0.02
+  AB: 0.3
+  dv:
+    min_00_gq: 20
+    min_01_gq: 3
+    min_dp: 20
+    max_dp: 250
+    min_PL: 20
+  hc:
+    min_00_gq: 20
+    min_01_gq: 20
+    min_dp: 30
+    max_dp: 250
+    min_PL: 20
+phasing:
+  enable: false
+  window_size: 10000
+  perl_cmd: perl workflow/scripts/extract_parental_origin.pl
+JIGV:
+  enable: false
+dnSTR:
+  enable: false
+  split_n: 400
+  dup_reg: ref/STR/GRCh38GenomicSuperDup.bed.gz
+  hipstr:
+    enable: true
+    ref_panel: ref/STR/hg38_ver13.hipstr_9.bed
+    monstr_filter: ' --min-span-coverage 3 --min-supp-reads 3 '
+    dumpstr_call_args: "--hipstr-min-call-DP 15   --hipstr-max-call-DP 1000  --hipstr-min-call-Q\
+      \ 0.9 --drop-filtered  --vcftype hipstr --hipstr-min-supp-reads 1  --hipstr-max-call-flank-indel\
+      \ 0.15  --hipstr-max-call-stutter 0.15 \n"
+multiqc:
+  enable: true
+  output_dir: MultiQC_output
+dnSV:
+  enable: false
+  exclude_bed: null
+  GraphTyper2+smoove:
+    enable: true
+  Manta:
+    enable: false
+threads:
+  bwa_index: 16
+  fastp: 8
+  fastq_screen: 8
+  fq2bam: 16
+  flagstat: 16
+  collectwgsmetrics: 16
+  collectmultiplemetrics: 8
+  gatkhc_pb: 16
+  gatk_combine_gvcf: 16
+  gatk_cgp: 16
+  gatk_genotype_gvcf_pb: 16
+  deepvariant_pb: 16
+  glnexus_dv: 8
+  phase_child: 2
+  phase_trios: 2
+  replace_rg: 4
+  manta_call: 10
+  uniq_svid: 4
+  svimmer: 4
+  graphtyper: 16
+  smoove: 8
+rufus:
+  enable: false
+  executable: runRufus.sh
+  container: null
+  runtime: apptainer
+  runtime_args: []
+  extra_args: []
+  kmer_size: 25
+  threads: 24
+  mem_mb: 256000
+  runtime_minutes: 5760
+igv_reports:
+  enable: false
+  source: joint
+  igv_js: ''
+  flank: 2000
+  initial_window: 400
+  coverage_max: 200
+  track_height: 320
+  read_height: 14
+  sampling_depth: 500
+  min_sv_length: 50
+  exclude_flags: 1536
+  max_variants: 0
+containers:
+  samtools: docker://euformatics/samtools:1.19.2
+  picard: docker://quay.io/biocontainers/picard:2.27.3--hdfd78af_0
+  telomerecat: docker://quay.io/wtsicgp/telomerecat:4.0.0
+  hipstr: docker://cgrlab/hipstr:latest
+  manta: docker://szarate/manta:v1.6.0
+  manta_joint: docker://kfdrc/manta:1.6.0
+  multiqc: docker://multiqc/multiqc:v1.33

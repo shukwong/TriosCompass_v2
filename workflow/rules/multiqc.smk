@@ -15,7 +15,7 @@ rule multiqc:
          html=report(MulitQC_output_dir + "/multiqc.html", caption="../report/multiqc.rst", category="Quality control"),
          dir=directory(MulitQC_output_dir),
     #conda: "../envs/multiqc.yaml"
-    singularity: "docker://multiqc/multiqc:v1.33"
+    singularity: config.get("containers", {}).get("multiqc", "docker://multiqc/multiqc:v1.33")
     shell: """
         multiqc --title QC --filename $(basename {output.html}) --outdir {output.dir} {input}  --force
     """

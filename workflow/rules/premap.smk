@@ -57,12 +57,12 @@ if config["fastq_input"]["fastqc"]["enable"]:
             extra = "--quiet"
         log:
             "logs/fastqc/{fid}.log"
-        threads: 1
+        threads: config["fastq_input"]["fastqc"].get("threads", 4)
         resources:
             mem_mb=10000,
             runtime=600
         wrapper:
-            "v2.1.1/bio/fastqc"     
+            config["fastq_input"]["fastqc"].get("wrapper", "v1.3.2/bio/fastqc")
     
     optional_output.append( expand(output_dir+"/fastqc/{id}.{reads}_fastqc.zip", id =ids, reads=['R1','R2']))
     qc_output.append( expand(output_dir+"/fastqc/{id}.{reads}_fastqc.zip", id =ids, reads=['R1','R2']))
