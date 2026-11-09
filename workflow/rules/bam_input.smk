@@ -29,9 +29,9 @@ if config["bam_input"]["reset_RG"]:
             container: tc_container("picard", "docker://quay.io/biocontainers/picard:2.27.3--hdfd78af_0")
             shell:
                 """
-                unset _JAVA_OPTIONS JDK_JAVA_OPTIONS
-                export JAVA_TOOL_OPTIONS="-Xmx{params.heap_mb}m -XX:+UseSerialGC"
-                picard AddOrReplaceReadGroups I={input:q} O={output:q} \
+                unset JAVA_TOOL_OPTIONS _JAVA_OPTIONS JDK_JAVA_OPTIONS
+                picard -Xms1m -Xmx{params.heap_mb}m -XX:+UseSerialGC \
+                    AddOrReplaceReadGroups I={input:q} O={output:q} \
                     RGLB=lib1 RGPL=illumina RGPU={wildcards.subj:q} \
                     RGSM={wildcards.subj:q} CREATE_INDEX=true
                 """

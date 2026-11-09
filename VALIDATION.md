@@ -48,8 +48,8 @@ VCF is reported separately from the published final VCF's validation.
 The audit checks VCF/sample structure, indexes, bounded BAM retrieval, QC tables,
 count summaries, phasing coverage and configured visualization reports. HipSTR
 VizAln emits an HTML fragment without an `<html>` envelope. The dedicated check
-requires a balanced alignment table, reference cells, ordered trio sample
-sections and read rows. Its caption must match HipSTR's `INFO/START` and
+requires a balanced alignment table, reference cells, exactly one section for each trio member, and per-sample read
+rows. Sample display order may differ from pedigree order. Its caption must match HipSTR's `INFO/START` and
 `INFO/END`, which can differ from the VCF `POS` used in the report filename.
 Stylesheet-only or truncated fragments fail; a generic HTML header is not enough.
 
@@ -73,6 +73,16 @@ modification times and SHA256 hashes for files within `--hash-limit-mb` (default
 16 MB). They do not establish full BAM/reference byte identity. Without a prior
 snapshot, the audit records current identities and a provenance warning.
 
+When `bam_input.reset_RG` is enabled, the source snapshot still describes the
+original PEP BAMs and their indexes. Their integrity and sequence dictionaries
+are checked without requiring their original read-group sample names to already
+match the pedigree. The effective `output_dir/fixed-rg/{sample}.bam` files must
+exist, carry the expected sample identities, preserve the original sequence
+dictionaries and alignment counts, and have valid indexes. IGV report payloads
+and RUFUS manifests are checked against these effective workflow inputs. With
+`reset_RG` disabled, the original PEP BAMs must carry the correct identities and
+remain the expected report/caller inputs.
+
 Large intermediate VCF and BAM checks use bounded samples. The relevant options
 are `--intermediate-records`, `--bam-records`, `--report-sessions`,
 `--max-html-mb` and `--hash-limit-mb`; `--help` lists their defaults. Final VCF
@@ -88,3 +98,8 @@ Run the portable fragment regressions with:
 ```bash
 python -m unittest discover -s tests -p 'test_full_workflow_validation.py' -v
 ```
+
+The full BAM provenance regression module (`test_full_workflow_bam_provenance.py`)
+also requires PyYAML, pysam and samtools, as provided by CI. It builds small
+synthetic indexed BAMs and exercises the validator CLI, corrected input selection,
+source snapshots, RUFUS manifests, and embedded IGV BAM/reference comparisons.

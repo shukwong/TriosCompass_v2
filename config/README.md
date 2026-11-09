@@ -331,6 +331,13 @@ the tools and their dependencies; binding a host Conda prefix into a generic
 image does not make a self-contained runtime. The tested GIAB images package the
 verified environments at `/opt/env`, with `PATH`, `CONDA_PREFIX`, and (for GATK)
 `JAVA_HOME` set inside the image. GNU Parallel and `bc` are included where used.
+Other GATK images may expose `gatk` and Java on `PATH` without `CONDA_PREFIX`.
+The GATK rule selects `$CONDA_PREFIX/bin/gatk` and that environment's Java only
+when Snakemake's Conda deployment is enabled; otherwise it uses the configured
+runtime's `PATH` and `JAVA_HOME`. GATK and Picard clear inherited Java option
+variables and pass their resource-derived maximum heap through launcher
+arguments. Picard also sets a 1 MiB initial heap so its default initial heap
+cannot exceed small allocations.
 
 ```yaml
 runtime:

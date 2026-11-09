@@ -10,6 +10,8 @@ import sys
 import tempfile
 import unittest
 
+from picard_launcher_fixture import PICARD_LAUNCHER
+
 
 RULE = Path(__file__).resolve().parents[1] / "workflow" / "rules" / "bam_qc.smk"
 SAMTOOLS = shutil.which("samtools")
@@ -192,25 +194,18 @@ if os.environ.get("MOCK_MODE") == "fail":
         self.assertFalse(self.output("telomerecat/sample.csv").exists())
 
     def install_picard(self):
-        self.install("picard", '''import json
-import os
-from pathlib import Path
-import sys
-args = sys.argv[1:]
-with open(os.environ["TOOL_TRACE"], "a") as trace:
-    trace.write(json.dumps({"tool": "picard", "args": args, "JAVA_TOOL_OPTIONS": os.environ.get("JAVA_TOOL_OPTIONS")}) + "\\n")
-Path(next(arg[2:] for arg in args if arg.startswith("O="))).write_text("metrics\\n")
-if os.environ.get("MOCK_MODE") == "fail":
-    sys.exit(31)
-''')
+        self.install("picard", PICARD_LAUNCHER)
 
     def test_picard_receives_intact_arguments_and_bounded_heap(self):
         self.make_bam()
         self.install_picard()
         self.run_rules({"collectwgsmetrics": {"enable": True, "mem_mb": 1024}})
         call, = self.traces("picard")
-        self.assertEqual(call["args"], ["CollectWgsMetrics", "I=" + str(self.bam), "O=QC output with spaces/collectwgsmetrics/sample.collect_wgs_metrics.txt", "R=" + str(self.ref)])
-        self.assertEqual(call["JAVA_TOOL_OPTIONS"], "-Xmx819m -XX:+UseSerialGC")
+        self.assertEqual(call["program_args"], ["CollectWgsMetrics", "I=" + str(self.bam), "O=QC output with spaces/collectwgsmetrics/sample.collect_wgs_metrics.txt", "R=" + str(self.ref)])
+        self.assertEqual(call["max_heap_bytes"], 819 * 1024 ** 2)
+        self.assertEqual(call["initial_heap_bytes"], 1024 ** 2)
+        self.assertEqual(call["java_options"], ["-Xms1m", "-Xmx819m", "-XX:+UseSerialGC"])
+        self.assertEqual(call["injected"], dict.fromkeys(("JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS")))
         self.assertEqual(self.output("collectwgsmetrics/sample.collect_wgs_metrics.txt").read_text(), "metrics\n")
 
     def test_picard_failure_removes_incomplete_metrics(self):

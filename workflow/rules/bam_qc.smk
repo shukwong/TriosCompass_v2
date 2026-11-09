@@ -30,9 +30,9 @@ if _bam_qc.get("collectwgsmetrics", {}).get("enable", False):
         singularity: tc_container("picard", "docker://quay.io/biocontainers/picard:2.27.3--hdfd78af_0")
         shell:
             """
-            unset _JAVA_OPTIONS JDK_JAVA_OPTIONS
-            export JAVA_TOOL_OPTIONS="-Xmx{params.heap_mb}m -XX:+UseSerialGC"
-            picard CollectWgsMetrics I={input.bam:q} O={output:q} R={input.ref:q}
+            unset JAVA_TOOL_OPTIONS _JAVA_OPTIONS JDK_JAVA_OPTIONS
+            picard -Xms1m -Xmx{params.heap_mb}m -XX:+UseSerialGC \
+                CollectWgsMetrics I={input.bam:q} O={output:q} R={input.ref:q}
             """
     optional_output.append(expand(output_dir + "/collectwgsmetrics/{subj}.collect_wgs_metrics.txt", subj=subjs))
     qc_output.append(expand(output_dir + "/collectwgsmetrics/{subj}.collect_wgs_metrics.txt", subj=subjs))

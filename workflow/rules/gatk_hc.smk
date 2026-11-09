@@ -53,14 +53,19 @@ rule gatk_combine_gvcf:
         output_dir + "/benchmark/gatk_combine_gvcf/{fam}.tsv"
     params: 
         v=lambda w, input: " -V ".join(input.vcfs),
-        java_heap_mb=_gatk_java_heap_mb
+        java_heap_mb=_gatk_java_heap_mb,
+        use_conda="true" if workflow.use_conda else "false"
     shell: """
         unset JAVA_TOOL_OPTIONS _JAVA_OPTIONS JDK_JAVA_OPTIONS
-        : "${{CONDA_PREFIX:?The GATK Conda environment must be activated}}"
-        export PATH="$CONDA_PREFIX/bin:$PATH"
-        export JAVA_HOME="$CONDA_PREFIX"
+        gatk_cmd=gatk
+        if {params.use_conda}; then
+            : "${{CONDA_PREFIX:?The GATK Conda environment must be activated}}"
+            export PATH="$CONDA_PREFIX/bin:$PATH"
+            export JAVA_HOME="$CONDA_PREFIX"
+            gatk_cmd="$CONDA_PREFIX/bin/gatk"
+        fi
         hash -r
-        "$CONDA_PREFIX/bin/gatk" --java-options "-Xmx{params.java_heap_mb}m" CombineGVCFs \
+        "$gatk_cmd" --java-options "-Xmx{params.java_heap_mb}m" CombineGVCFs \
             -V {params.v} \
             -R {input.ref} \
             -O {output} 

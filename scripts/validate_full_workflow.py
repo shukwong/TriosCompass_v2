@@ -213,20 +213,23 @@ class Audit:
                 self.check(branch, 'index_signature', lambda: inspect_index(index), index)
         return parsed
 
-    def bam_header(self, path, sample):
+    def bam_header(self, path, sample=None):
         header = self.sam('view', '-H', path)
         samples = {field[3:] for line in header.splitlines() if line.startswith('@RG\t') for field in line.split('\t')[1:] if field.startswith('SM:')}
-        require(samples == {sample}, 'BAM RG/SM {} != {}'.format(sorted(samples), sample))
-        reference = [line for line in header.splitlines() if line.startswith('@SQ\t')]
+        if sample is not None:
+            require(samples == {sample}, 'BAM RG/SM {} != {}'.format(sorted(samples), sample))
+        # SAM header writers may reorder @SQ attributes without changing the dictionary.
+        reference = [dict(field.split(':', 1) for field in line.split('\t')[1:])
+                     for line in header.splitlines() if line.startswith('@SQ\t')]
         require(reference, 'BAM has no sequence dictionary')
         self.bam_headers[str(path)] = {'sample': sample, 'reference': reference}
-        return {'samples': sorted(samples), 'contigs': len(reference), 'header_sha256': hashlib.sha256(header.encode()).hexdigest()}
+        return {'samples': sorted(samples), 'sample_identity_checked': sample is not None, 'contigs': len(reference), 'header_sha256': hashlib.sha256(header.encode()).hexdigest()}
 
     def bam(self, branch, path, sample, filtering=None):
         if not self.file(branch, path):
             return None
         self.check(branch, 'bam_quickcheck', lambda: {'output': self.sam('quickcheck', '-v', path)}, path)
-        self.check(branch, 'bam_trio_identity', lambda: self.bam_header(path, sample), path)
+        self.check(branch, 'bam_trio_identity' if sample is not None else 'bam_header_structure', lambda: self.bam_header(path, sample), path)
         index = next((p for p in (Path(str(path)+'.bai'), Path(path).with_suffix('.bai'), Path(str(path)+'.csi')) if p.is_file()), Path(str(path)+'.bai'))
         if self.file(branch, index):
             self.check(branch, 'bam_index_signature', lambda: inspect_index(index), index)
@@ -355,8 +358,8 @@ class Audit:
                         self.bam_header(path,member['sample'])
                         require(self.bam_headers[str(path)]['reference'] == self.bam_headers[str(bams[member['sample']])]['reference'], 'Embedded BAM sequence dictionary differs from source')
                         actual=collections.Counter(self.sam('view',path).splitlines())
-                        expected=collections.Counter(self.sam('view','-M','-F',str(manifest['settings']['exclude_flags']),member['bam'],*regions).splitlines())
-                        require(actual == expected, 'Embedded BAM records differ from original indexed source')
+                        expected=collections.Counter(self.sam('view','-M','-F',str(manifest['settings']['exclude_flags']),bams[member['sample']],*regions).splitlines())
+                        require(actual == expected, 'Embedded BAM records differ from effective workflow source')
                         payloads+=1
             return {'rendered':len(rendered),'skipped':manifest['skipped'],'payload_sessions_checked':len(selected),'all_sessions_payload_checked':len(selected)==len(rendered),'bam_payloads_checked':payloads,'reference_segments_checked':references,'browser_tested':False}
         self.check(branch, 'source_provenance_and_bounded_payload_validation', validate, manifest_file)
@@ -420,11 +423,14 @@ def run(audit):
     inputs=audit.check('source_identity','input_manifest',input_bams)
     if inputs is None:
         return audit.finish()
-    bams={s:Path(p) for s,p in inputs['bams'].items()}
+    raw_bams={s:Path(p) for s,p in inputs['bams'].items()}
+    reset_rg=bool(config.get('bam_input',{}).get('reset_RG',False))
+    # Match bam_input.smk:get_bam(); raw inputs remain the provenance baseline.
+    bams={s:out/'fixed-rg'/(s+'.bam') for s in trio} if reset_rg else raw_bams
     reference=audit.path(config['ref']['sequence'])
     source_paths=[*audit.config_paths,ped,Path(inputs['pep']),Path(inputs['sample_table']),reference,Path(str(reference)+'.fai')]
-    source_paths.extend(bams.values())
-    for bam in bams.values():
+    source_paths.extend(raw_bams.values())
+    for bam in raw_bams.values():
         index=next((p for p in (Path(str(bam)+'.bai'),bam.with_suffix('.bai'),Path(str(bam)+'.csi')) if p.is_file()),Path(str(bam)+'.bai'))
         source_paths.append(index)
     current=audit.check('provenance','source_metadata_snapshot',lambda:audit.source_snapshot(source_paths))
@@ -447,8 +453,17 @@ def run(audit):
     switches={name:enable(*path) for name,path in {'phasing':('phasing',),'JIGV':('JIGV',),'dnSTR':('dnSTR',),'HipSTR':('dnSTR','hipstr'),'dnSV':('dnSV',),'GraphTyper+smoove':('dnSV','GraphTyper2+smoove'),'Manta':('dnSV','Manta'),'rufus':('rufus',),'IGV':('igv_reports',),'MultiQC':('multiqc',),'flagstat':('bam_qc','flagstat'),'WGSmetrics':('bam_qc','collectwgsmetrics'),'multiplemetrics':('bam_qc','collectmultiplemetrics'),'Telomerecat':('bam_qc','telomerecat'),'BAMexports':('bam_qc','bam2bam')}.items()}
     audit.check('configuration','entire_bam_workflow_enabled',lambda:(require(not config.get('fastq_input',{}).get('enable',False),'Expected existing BAM input'),require(all(switches.values()) or args.allow_disabled,'Disabled required branches: '+','.join(k for k,v in switches.items() if not v)),switches)[-1])
     audit.check('runtime','samtools_version',lambda:{'version':audit.sam('--version').splitlines()[0]})
-    for sample,bam in bams.items():
-        audit.bam('source_identity',bam,sample)
+    for sample,bam in raw_bams.items():
+        original=audit.bam('source_identity',bam,None if reset_rg else sample)
+        if reset_rg:
+            repaired=audit.bam('workflow_bams',bams[sample],sample)
+            if original is not None and repaired is not None:
+                def repaired_identity(bam=bam,effective=bams[sample],original=original,repaired=repaired):
+                    require(str(bam) in audit.bam_headers and str(effective) in audit.bam_headers,'Missing validated BAM headers')
+                    require(audit.bam_headers[str(bam)]['reference']==audit.bam_headers[str(effective)]['reference'],'RG replacement changed the sequence dictionary')
+                    require(original['indexed_total_records']==repaired['indexed_total_records'],'RG replacement changed alignment counts')
+                    return {'input_bam':str(bam),'workflow_bam':str(effective),'indexed_total_records':repaired['indexed_total_records']}
+                audit.check('workflow_bams','read_group_repair_preserves_dictionary_and_counts',repaired_identity,bams[sample])
     dnm=audit.vcf('small_variants',out/'dnm_vcf'/f'{family}.dnm.vcf.gz',order=[child],keys=True,indexed=True)
     summary=out/'dnm_vcf_summary/DNM_summary.txt'
     if audit.file('small_variants',summary):
@@ -590,6 +605,9 @@ def run(audit):
             require(complete,'No completed RUFUS attempt manifest for published VCF')
             p,m=max(complete,key=lambda pair:pair[1].get('finished_utc',''))
             require([r['sample'] for r in m['trio']]==trio,'RUFUS manifest trio order mismatch')
+            for member in m['trio']:
+                require(Path(member['bam']).resolve()==bams[member['sample']].resolve(),'RUFUS uses a different BAM')
+            require(Path(m['reference']).resolve()==reference.resolve(),'RUFUS reference mismatch')
             require(rufus is not None and m['counts']['total_records']==rufus['records_examined'],'RUFUS manifest count differs')
             return {'manifest':str(p),'caller_log':m.get('caller_log'),'command':m.get('command'),'work_dir':m.get('work_dir')}
         chosen=audit.check('RUFUS','completed_attempt_provenance',manifest_check)
@@ -771,7 +789,9 @@ def vizaln_html_document(path, samples, expected_locus, max_html_mb=256):
     locus = [parts[0], int(parts[1]), int(parts[2])]
     require(locus == list(expected_locus), 'VizAln caption {} != recalled HipSTR interval {}'.format(locus, expected_locus))
     require(parser.reference_cells > 0, 'Missing VizAln reference sequence cells')
-    require(parser.samples == list(samples), 'VizAln sample sections {} != required trio {}'.format(parser.samples, samples))
+    # HipSTR emits samples lexically, independently of pedigree role order.
+    require(len(parser.samples) == len(set(parser.samples)) and set(parser.samples) == set(samples),
+            'VizAln sample sections {} != required trio {}'.format(parser.samples, samples))
     require(all(parser.read_rows[s] > 0 for s in samples), 'Missing VizAln alignment rows for one or more trio members')
     return {'html': True, 'fragment': not bool(parser.tags['html']), 'bytes': path.stat().st_size,
             'locus': locus, 'samples': parser.samples, 'reference_cells': parser.reference_cells,

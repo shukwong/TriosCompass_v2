@@ -4,6 +4,8 @@ import importlib.util
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 SCRIPT = Path(__file__).resolve().parents[1] / 'scripts/validate_full_workflow.py'
 spec = importlib.util.spec_from_file_location('full_workflow_validator', SCRIPT)
 validator = importlib.util.module_from_spec(spec); spec.loader.exec_module(validator)
@@ -28,6 +30,27 @@ class VizAlnTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, pattern): self.inspect(text)
     def test_real_fragment_contract(self):
         d=self.inspect(fragment());self.assertTrue(d['fragment']);self.assertEqual(d['alignment_rows_by_sample'],dict.fromkeys(SAMPLES,1))
+    def test_lexical_non_giab_sample_order_is_valid(self):
+        trio = ['Z_child', 'A_father', 'B_mother']
+        body = STYLE+'<div><table class="reftable"><caption>chr1 104 110</caption>'+REFERENCE
+        body += ''.join(sample(name) for name in sorted(trio))+'</table><br></div>'
+        self.path.write_text(body)
+        result = validator.vizaln_html_document(self.path, trio, LOCUS)
+        self.assertEqual(result['samples'], sorted(trio))
+        self.assertEqual(result['alignment_rows_by_sample'], dict.fromkeys(trio, 1))
+    def test_extra_sample_is_rejected(self):
+        self.rejects(fragment().replace('</table>',sample('extra')+'</table>'),'sample sections')
+    def test_duplicate_section_is_rejected_even_with_all_members_present(self):
+        self.rejects(fragment().replace('</table>',sample('father')+'</table>'),'sample sections')
+    def test_bam_dictionary_attribute_order_is_semantic(self):
+        audit = validator.Audit(SimpleNamespace(run_dir=self.temporary.name, report_dir=None, samtools='samtools'))
+        headers = ['@SQ\tSN:chr1\tLN:100\n@RG\tID:c\tSM:child\n',
+                   '@SQ\tLN:100\tSN:chr1\n@RG\tID:c\tSM:child\n']
+        with mock.patch.object(audit, 'sam', side_effect=headers):
+            audit.bam_header('original.bam', 'child')
+            audit.bam_header('corrected.bam', 'child')
+        self.assertEqual(audit.bam_headers['original.bam']['reference'],
+                         audit.bam_headers['corrected.bam']['reference'])
     def test_full_document_wrapper(self):
         self.assertFalse(self.inspect('<!doctype html><html><body>'+fragment()+'</body></html>')['fragment'])
     def test_stylesheet_only_is_rejected(self): self.rejects(STYLE,'alignment table')
