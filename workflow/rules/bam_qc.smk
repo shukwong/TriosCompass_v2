@@ -1,6 +1,6 @@
 # Optional sample QC. Filtered BAMs are exports, never implicit caller inputs.
 _bam_qc = config.get("bam_qc", {})
-_samtools_image = config.get("containers", {}).get("samtools", "docker://euformatics/samtools:1.19.2")
+_samtools_image = tc_container("samtools", "docker://euformatics/samtools:1.19.2")
 
 if _bam_qc.get("flagstat", {}).get("enable", False):
     rule flagstat:
@@ -27,7 +27,7 @@ if _bam_qc.get("collectwgsmetrics", {}).get("enable", False):
             runtime=_bam_qc["collectwgsmetrics"].get("runtime_minutes", 1440)
         params: heap_mb=lambda w, resources: max(1, int(resources.mem_mb * 0.8))
         benchmark: output_dir + "/benchmark/collectwgsmetrics/{subj}.tsv"
-        singularity: config.get("containers", {}).get("picard", "docker://quay.io/biocontainers/picard:2.27.3--hdfd78af_0")
+        singularity: tc_container("picard", "docker://quay.io/biocontainers/picard:2.27.3--hdfd78af_0")
         shell:
             """
             unset _JAVA_OPTIONS JDK_JAVA_OPTIONS
@@ -49,7 +49,7 @@ if _bam_qc.get("collectmultiplemetrics", {}).get("enable", False):
         benchmark: output_dir + "/benchmark/collectmultiplemetrics/{subj}.tsv"
         params:
             prefix=output_dir + "/collectmultiplemetrics/{subj}",
-            singularity_cmd=config["parabricks"]["singularity_cmd"],
+            singularity_cmd=tc_parabricks(),
             mode="--gen-all-metrics" if _metrics_mode == "all" else "--gen-seq-artifact"
         shell:
             "{params.singularity_cmd} pbrun collectmultiplemetrics --ref {input.ref:q} "
@@ -71,7 +71,7 @@ if _bam_qc.get("telomerecat", {}).get("enable", False):
             csv=lambda w, output: os.path.abspath(output.csv),
             work=lambda w: os.path.abspath(output_dir + "/telomerecat/work/" + w.subj),
             executable=_telomerecat.get("executable", "telomerecat")
-        singularity: config.get("containers", {}).get("telomerecat", "docker://quay.io/wtsicgp/telomerecat:4.0.0")
+        singularity: tc_container("telomerecat", "docker://quay.io/wtsicgp/telomerecat:4.0.0")
         log: output_dir + "/logs/telomerecat/{subj}.log"
         benchmark: output_dir + "/benchmark/telomerecat/{subj}.tsv"
         shell:

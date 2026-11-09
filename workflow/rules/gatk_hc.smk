@@ -21,7 +21,9 @@ rule gatkhc_pb:
         gpu=1
     conda: "../envs/tabix.yaml"
     params: 
-        singularity_cmd = config["parabricks"]["singularity_cmd"]
+        singularity_cmd = tc_parabricks(),
+        bgzip_cmd = tc_exec("tabix", "bgzip"),
+        tabix_cmd = tc_exec("tabix", "tabix")
     benchmark:
         output_dir +"/benchmark/gatkhc_pb/{subj}.tsv"
     shell: """
@@ -31,8 +33,8 @@ rule gatkhc_pb:
             --ref {input.ref} \
             --in-bam {input.bam} \
             --out-variants {output.gvcf}   
-        bgzip -c {output.gvcf} > {output.gz}
-        tabix {output.gz}     
+        {params.bgzip_cmd} -c {output.gvcf} > {output.gz}
+        {params.tabix_cmd} {output.gz}
     """
 
 rule gatk_combine_gvcf:
@@ -46,6 +48,7 @@ rule gatk_combine_gvcf:
     resources:
         mem_mb=16000
     conda: "../envs/gatk4.yaml"
+    container: tc_container("gatk4")
     benchmark:
         output_dir + "/benchmark/gatk_combine_gvcf/{fam}.tsv"
     params: 
@@ -76,15 +79,18 @@ rule gatk_genotype_gvcf_pb:
     conda: "../envs/tabix.yaml"
     benchmark:
         output_dir + "/benchmark/gatk_genotype_gvcf_pb/{fam}.tsv"
-    params: singularity_cmd = config["parabricks"]["singularity_cmd"]
+    params:
+        singularity_cmd = tc_parabricks(),
+        bgzip_cmd = tc_exec("tabix", "bgzip"),
+        tabix_cmd = tc_exec("tabix", "tabix")
     shell: """
         {params.singularity_cmd} \
         pbrun genotypegvcf \
             --in-gvcf {input.gvcf} \
             --ref {input.ref} \
             --out-vcf {output.vcf} 
-        bgzip -@ {threads} -c {output.vcf}> {output.gz} && \
-        tabix {output.gz}
+        {params.bgzip_cmd} -@ {threads} -c {output.vcf}> {output.gz} && \
+        {params.tabix_cmd} {output.gz}
     """
 
 # drop CalculateGenotypePosteriors completely
@@ -106,6 +112,7 @@ if config["gatk_hc"]["gatk_hard_filter"]["enable"]:
             tbi=output_dir+"/gatk_cgp/{fam}.cgp_norm.vcf.gz.tbi",
         threads: config["threads"]["gatk_cgp"]
         conda: "../envs/bcftools.yaml"
+        container: tc_container("bcftools")
         benchmark:
             output_dir + "/benchmark/gatk_cgp/{fam}.tsv"
         params: filter=config["gatk_hc"]["gatk_hard_filter"]["filter"]
@@ -126,6 +133,7 @@ else:
             tbi=output_dir+"/gatk_cgp/{fam}.cgp_norm.vcf.gz.tbi",
         threads: config["threads"]["gatk_cgp"]
         conda: "../envs/bcftools.yaml"
+        container: tc_container("bcftools")
         benchmark:
             output_dir + "/benchmark/gatk_cgp/{fam}.tsv"
         resources: 

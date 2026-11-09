@@ -61,7 +61,7 @@ class WorkflowConfigurationTests(unittest.TestCase):
     def write_pep(self):
         self.pep.write_text(self.yaml.safe_dump({"pep_version": "2.0.0", "sample_table": str(self.manifest)}))
 
-    def dryrun(self, targets=(), profile=False, expect_success=True):
+    def dryrun(self, targets=(), profile=False, expect_success=True, extra_args=()):
         configfile = self.work / "config.yaml"
         configfile.write_text(self.yaml.safe_dump(self.config))
         command = [sys.executable, "-m", "snakemake", "--snakefile", str(REPO / "workflow" / "Snakefile"),
@@ -70,6 +70,7 @@ class WorkflowConfigurationTests(unittest.TestCase):
         if profile:
             self.prepare_profile_runtime()
             command.extend(["--profile", str(REPO / "workflow" / "profiles" / "biowulf")])
+        command.extend(extra_args)
         command.extend(targets)
         result = subprocess.run(command, cwd=self.work, env=self.env, text=True, capture_output=True, check=False, timeout=60)
         output = result.stdout + result.stderr
@@ -166,6 +167,70 @@ class WorkflowConfigurationTests(unittest.TestCase):
         _, output = self.dryrun()
         self.assertIn("rule smoove:", output)
         self.assertIn("--exclude " + str(self.exclude), output)
+
+    def configure_container_only(self):
+        self.config["runtime"] = {"container_only": True, "args": ["--cleanenv"]}
+        self.config["parabricks"] = {"singularity_cmd": "apptainer exec --cleanenv --nv /images/parabricks.sif"}
+        self.config["containers"] = {name: "/images/" + name + ".sif" for name in (
+            "utility", "bcftools", "tabix", "glnexus", "gatk4", "slivar", "graphtyper",
+            "vcflib", "survivor", "trtools", "csvtk", "whatshap", "rufus", "igv-reports",
+            "samtools", "picard", "telomerecat", "hipstr", "manta", "manta_joint",
+            "svimmer", "smoove", "monstr", "jigv", "multiqc")}
+        self.prepare_profile_runtime()
+        return ("--use-singularity", "--singularity-args", " --cleanenv")
+
+    def test_container_only_covers_every_enabled_bam_branch(self):
+        args = self.configure_container_only()
+        self.config["bam_input"] = {"reset_RG": True}
+        self.config["containers"]["bwa"] = "/images/bwa.sif"
+        self.config["rufus"] = {"enable": True, "executable": "/opt/rufus/runRufus.sh"}
+        self.config["igv_reports"] = {"enable": True, "source": "joint"}
+        self.config["phasing"] = {"enable": True}
+        self.config["JIGV"] = {"enable": True}
+        self.config["dnSV"] = {"enable": True, "exclude_bed": str(self.exclude),
+                                "GraphTyper2+smoove": {"enable": True}, "Manta": {"enable": True}}
+        panel = self.work / "str_panel.bed"
+        panel.write_text("chr1\t10\t20\t2\t5\n")
+        self.config["dnSTR"] = {"enable": True, "split_n": 2, "dup_reg": str(self.exclude),
+                               "hipstr": {"enable": True, "ref_panel": str(panel)}}
+        for feature in ("flagstat", "collectwgsmetrics", "collectmultiplemetrics", "telomerecat", "bam2bam"):
+            self.config["bam_qc"][feature] = {"enable": True}
+        self.config["multiqc"] = {"enable": True, "output_dir": "multiqc"}
+        _, output = self.dryrun(extra_args=args)
+        for name in ("run_rufus", "igv_reports_dnsv", "graphtyper", "dnSV_manta", "hipstr",
+                     "dumpstr_call", "monstr", "call_JIGV", "scatter_dnms", "replace_rg", "multiqc"):
+            self.assertIn(name, output)
+        self.assertIn("apptainer exec --cleanenv /images/tabix.sif bgzip", output)
+        self.assertIn("python3", output)
+        self.assertIn("parallel --jobs 1 'graphtyper", output)
+        self.assertNotIn("Creating conda environment", output)
+
+    def test_container_only_fastq_uses_explicit_tools_without_wrappers(self):
+        args = self.configure_container_only()
+        self.set_fastq_manifest()
+        self.config["fastq_input"]["fastqc"]["enable"] = True
+        self.config["containers"].update({name: "/images/" + name + ".sif" for name in ("bwa", "fastp", "fastqc")})
+        Path(str(self.ref) + ".bwt").unlink()
+        _, output = self.dryrun(extra_args=args)
+        self.assertIn("bwa index", output)
+        self.assertIn("fastqc --quiet --threads", output)
+        self.assertIn("pbrun fq2bam", output)
+        self.assertNotIn("Creating conda environment", output)
+
+    def test_container_only_fails_before_execution_when_tool_image_is_missing(self):
+        args = self.configure_container_only()
+        del self.config["containers"]["glnexus"]
+        result, output = self.dryrun(extra_args=args, expect_success=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("requires containers.glnexus", output)
+
+    def test_container_profile_rejects_legacy_native_fallback(self):
+        self.config["parabricks"] = {"singularity_cmd": "apptainer exec --cleanenv --nv /images/parabricks.sif"}
+        self.prepare_profile_runtime()
+        profile = REPO / "workflow" / "profiles" / "biowulf-container"
+        result, output = self.dryrun(extra_args=("--profile", str(profile)), expect_success=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("runtime.container_only requires containers.tabix", output)
 
     def prepare_profile_runtime(self):
         # Snakemake probes deployment tools even in dry-run mode. These metadata-

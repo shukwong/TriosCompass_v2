@@ -70,6 +70,7 @@ os.execv(os.environ["SAMTOOLS_REAL"], [os.environ["SAMTOOLS_REAL"], *sys.argv[1:
             + "genome = " + repr(str(self.ref)) + "\n"
             + "subjs = ['sample']\noptional_output = []\nqc_output = []\n"
             + "def get_bam_by_subj(wildcards):\n    return " + repr(str(self.bam)) + "\n"
+            + "include: " + repr(str(RULE.with_name("runtime.smk"))) + "\n"
             + "include: " + repr(str(RULE)) + "\n"
             + "rule all:\n    default_target: True\n    input: optional_output\n"
         )

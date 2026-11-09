@@ -313,3 +313,84 @@ for all input/output files; cache environments and images in persistent storage.
 
 Unit tests use synthetic data. Full DAG checks and mocked launchers do not
 establish whole-genome caller concordance, telomere accuracy, or GPU performance.
+
+
+## Container-only execution
+The supplied Slurm jobscript forwards `CUDA_VISIBLE_DEVICES` into Apptainer/Singularity, including an explicitly empty assignment, so clean container environments retain the scheduler GPU allocation.
+
+
+Use `workflow/profiles/biowulf-container` to execute scientific tools through
+Apptainer/Singularity with `--cleanenv`. This profile disables host Conda and
+environment modules and forces `container_only=true`. Workflow parsing rejects
+missing images, native executable rules, and mixed Conda execution before any
+analysis is submitted. The Snakemake controller and scheduler helpers still run
+in their orchestration environment.
+
+Provide local SIF paths in the run configuration. Container files should contain
+the tools and their dependencies; binding a host Conda prefix into a generic
+image does not make a self-contained runtime. The tested GIAB images package the
+verified environments at `/opt/env`, with `PATH`, `CONDA_PREFIX`, and (for GATK)
+`JAVA_HOME` set inside the image. GNU Parallel and `bc` are included where used.
+
+```yaml
+runtime:
+  container_only: true
+  executable: apptainer  # singularity is also supported
+  args: [--cleanenv]
+containers:
+  utility: /absolute/path/utility.sif
+  bcftools: /absolute/path/bcftools.sif
+  tabix: /absolute/path/tabix.sif
+  gatk4: /absolute/path/gatk4.sif
+  glnexus: /absolute/path/glnexus.sif
+  slivar: /absolute/path/slivar.sif
+  csvtk: /absolute/path/csvtk.sif
+  graphtyper: /absolute/path/graphtyper.sif
+  vcflib: /absolute/path/vcflib.sif
+  survivor: /absolute/path/survivor.sif
+  whatshap: /absolute/path/whatshap.sif
+  trtools: /absolute/path/trtools.sif
+  igv-reports: /absolute/path/igv-reports.sif
+  rufus: /absolute/path/rufus.sif
+  bwa: /absolute/path/bwa.sif
+parabricks:
+  singularity_cmd: apptainer exec --cleanenv --nv /absolute/path/parabricks.sif
+rufus:
+  enable: true
+  executable: /opt/rufus/runRufus.sh
+  container: null
+```
+
+Configure only the optional branches you enable, plus the common calling tools.
+Existing container tools also accept local images through `samtools`, `picard`,
+`telomerecat`, `hipstr`, `manta`, `manta_joint`, `smoove`, `svimmer`, `monstr`,
+`jigv`, and `multiqc`. FASTQ processing additionally requires `fastp` and, when
+enabled, `fastqc`. BWA is required for FASTQ alignment or RUFUS reference indexing.
+The utility image must include Python/Python3, Perl, GNU Parallel, `bc`, and standard
+GNU shell utilities. A GraphTyper image must include GNU Parallel.
+The HipSTR image must include Python 3, `VizAln_rev` on `PATH`, and its
+adjacent `generate_aln_html.py` helper. STR report generation uses the VCF
+`INFO/START` and `INFO/END` coordinates while retaining VCF `POS` filenames.
+
+Parabricks runs through its explicit GPU container command. Its `bgzip` and `tabix`
+steps use a separate configured HTS image, avoiding a container within a container.
+`containers.rufus` contains the complete rule, including its Python adapter; do
+not also set `rufus.container`, which is the older caller-only mode. Set the
+RUFUS executable to its path inside the image.
+
+```bash
+snakemake --snakefile workflow/Snakefile \
+  --profile workflow/profiles/biowulf-container \
+  --configfile /absolute/path/run.yaml all
+```
+
+Supply filesystem binds through `APPTAINER_BINDPATH`/`SINGULARITY_BINDPATH` in
+the launch environment and jobscript. On Biowulf include both `/data` and its
+`/vf` targets and allocated scratch. Forward intentional thread/RUFUS tuning
+variables with `APPTAINERENV_`/`SINGULARITYENV_` prefixes; `--cleanenv` removes
+ordinary host variables, including conflicting Python packages.
+
+The IGV environment pins Python 3.11, pysam 0.23.3, and igv-reports 1.17.0.
+The 1.17.0 package was unavailable in the configured Conda channels, so the
+recipe installs that same pinned release through pip. The container packages
+that verified environment; workflow execution requires no pip/Conda installation.

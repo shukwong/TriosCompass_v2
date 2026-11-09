@@ -2,6 +2,9 @@ import json
 
 _rufus_config = config.get("rufus", {})
 _rufus_work = _rufus_config.get("work_dir", output_dir + "/rufus/work")
+_rufus_image = tc_container("rufus")
+if _rufus_image and _rufus_config.get("container"):
+    raise ValueError("Use containers.rufus for the entire rule or rufus.container for the caller, not both")
 
 
 rule run_rufus:
@@ -33,6 +36,8 @@ rule run_rufus:
         output_dir + "/logs/rufus/{fam}.log"
     benchmark:
         output_dir + "/benchmark/rufus/{fam}.tsv"
+    container:
+        _rufus_image
     shell:
         """
         python {input.helper:q} run \
@@ -61,6 +66,8 @@ rule rufus_summary:
     resources:
         mem_mb=1000,
         runtime=30
+    container:
+        tc_container("utility")
     shell:
         """
         python {input.helper:q} summary \

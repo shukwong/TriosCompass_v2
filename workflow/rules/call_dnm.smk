@@ -20,6 +20,7 @@ rule call_dnm_dv:
         min_PL=config["call_dnm"]["dv"]["min_PL"],
         AB=config["call_dnm"]["AB"],
     conda: "../envs/slivar.yaml"
+    container: tc_container("slivar")
     shell: """
         
         slivar expr  \
@@ -115,6 +116,7 @@ rule merge_DV_GATK:
         both=output_dir +"/GATK_DV/D_and_G.{fam}.dnm.vcf.gz",
         one=output_dir +"/GATK_DV/D_or_G.{fam}.dnm.vcf.gz"
     conda: "../envs/bcftools.yaml"
+    container: tc_container("bcftools")
     shell: """
         bcftools merge --force-samples --threads 2 -m none {input.DV} {input.GATK} -Oz -o {output.gz}
         tabix {output.gz}
@@ -140,6 +142,7 @@ rule dnm_vcf:
             }
         )
     conda: "../envs/bcftools.yaml"
+    container: tc_container("bcftools")
     params: 
         proband = lambda w: CHILD_DICT[w.fam]
     shell: """
@@ -148,6 +151,7 @@ rule dnm_vcf:
     """
 
 rule dnm_vcf_summary:
+    container: tc_container("utility")
     input:
         expand(output_dir +"/dnm_vcf/{fam}.dnm.vcf.gz", fam=fam_ids)
     output:
@@ -161,5 +165,5 @@ rule dnm_vcf_summary:
             }
         )
     shell: """
-        (echo -e "TrioID\tDNM_Cnt" && ls {input} | parallel 'id=$(basename {{/}} .dnm.vcf.gz);cnt=$(zgrep -v "^#" {{}} |wc -l); echo -e "$id\t$cnt" ')  > {output}
+        (echo -e "TrioID\tDNM_Cnt" && ls {input} | parallel --jobs {threads} 'id=$(basename {{/}} .dnm.vcf.gz);cnt=$(zgrep -v "^#" {{}} |wc -l); echo -e "$id\t$cnt" ')  > {output}
     """

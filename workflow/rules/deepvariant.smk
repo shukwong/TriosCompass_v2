@@ -12,7 +12,10 @@ rule deepvariant_pb:
     benchmark:
         output_dir +"/benchmark/deepvariant_pb/{subj}.tsv"
     conda: "../envs/tabix.yaml"
-    params: singularity_cmd = config["parabricks"]["singularity_cmd"]
+    params:
+        singularity_cmd = tc_parabricks(),
+        bgzip_cmd = tc_exec("tabix", "bgzip"),
+        tabix_cmd = tc_exec("tabix", "tabix")
     shell: """
         {params.singularity_cmd} \
         pbrun deepvariant \
@@ -20,8 +23,8 @@ rule deepvariant_pb:
         --ref {input.ref} \
         --in-bam {input.bam} \
         --out-variants {output.gvcf} 
-        bgzip -c {output.gvcf} > {output.gz}
-        tabix {output.gz}
+        {params.bgzip_cmd} -c {output.gvcf} > {output.gz}
+        {params.tabix_cmd} {output.gz}
     """
 
 rule glnexus_dv: 
@@ -36,6 +39,7 @@ rule glnexus_dv:
     benchmark:
         output_dir +"/benchmark/glnexus_dv/dv_{fam}.tsv"
     conda: "../envs/glnexus.yaml"
+    container: tc_container("glnexus")
     params: 
         tempdir=temp(directory(output_dir +"/glnexus/GLnexus.DB_{}")).format(uuid.uuid4()),
         config=config["deepvariant"]["glnexus_config"] 

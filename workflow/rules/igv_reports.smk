@@ -60,6 +60,8 @@ rule igv_reports_dnsv:
         output_dir + "/benchmark/igv_reports/{fam}.tsv"
     conda:
         "../envs/igv-reports.yaml"
+    container:
+        tc_container("igv-reports")
     shell:
         """
         export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1

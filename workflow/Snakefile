@@ -17,6 +17,7 @@ report: "report/workflow.rst"
 # Using singularity for conda/mamba support
 # container: "docker://condaforge/mambaforge"
 
+include: "rules/runtime.smk"
 include: "rules/common.smk"
 include: "rules/pedigree.smk"
 include: "rules/ref.smk"
@@ -62,3 +63,7 @@ rule all:
     input:
         output_dir + "/dnm_vcf_summary/DNM_summary.txt",
         optional_output=optional_output
+
+
+# Fail closed before execution if a newly added rule bypasses container mode.
+tc_validate_rules(workflow.rules)

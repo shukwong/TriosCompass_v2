@@ -3,5 +3,7 @@ channels:
   - bioconda
 dependencies:
   - python=3.11
-  - igv-reports=1.17.0
+  - pip
   - pysam=0.23.3
+  - pip:
+      - igv-reports==1.17.0

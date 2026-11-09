@@ -1,6 +1,7 @@
 ## split bed files first
 # skip chrX for the time being
 rule split_bed_hipstr: 
+    container: tc_container("utility")
     input: 
         config["dnSTR"]["hipstr"]["ref_panel"]
     output:
@@ -27,7 +28,7 @@ rule hipstr:
     log: output_dir + "/hipstr/{chunk}.log"
     benchmark:
         output_dir + "/benchmark/hipstr/{chunk}.tsv"
-    singularity: config.get("containers", {}).get("hipstr", "docker://cgrlab/hipstr:latest")
+    singularity: tc_container("hipstr", "docker://cgrlab/hipstr:latest")
     params: 
         bams=lambda w, input: ",".join(input.bams)
     shell: """
@@ -67,6 +68,7 @@ rule hipstr:
 # skip output_dir + "/vizaln/{fam}/{fam}_recall.both.bed"
 
 rule bedfile_for_hipstr_call:
+    container: tc_container("utility")
     input: 
         tab=output_dir +"/monstr_filter/hipstr.filtered.tab",
         ref_panel = config["dnSTR"]["hipstr"]["ref_panel"]
@@ -100,7 +102,7 @@ rule hipstr_recall:
     log: output_dir + "/vizaln/{fam}/{fam}.hipstr.hipstr.log"
     params:
         bams=lambda w, input: ",".join(input.bams)
-    singularity: config.get("containers", {}).get("hipstr", "docker://cgrlab/hipstr:latest")
+    singularity: tc_container("hipstr", "docker://cgrlab/hipstr:latest")
     benchmark:
         output_dir +"/benchmark/hipstr_recall/{fam}_hipstr.tsv"
     shell: """
@@ -133,6 +135,7 @@ rule hipstr_recall:
     """
 
 checkpoint scatter_chr_pos:
+    container: tc_container("utility")
     input: 
         output_dir + "/vizaln/{fam}/{fam}.hipstr.vcf.gz"
     output:
@@ -153,7 +156,10 @@ checkpoint scatter_chr_pos:
 rule vizaln:
     input: 
         dummy=output_dir + "/vizaln/{fam}/hipstr/variants/{chr}_{pos}.dnm",
-        viz=output_dir + "/vizaln/{fam}/{fam}.hipstr.aln.viz.gz"
+        viz=output_dir + "/vizaln/{fam}/{fam}.hipstr.aln.viz.gz",
+        viz_index=output_dir + "/vizaln/{fam}/{fam}.hipstr.aln.viz.gz.tbi",
+        vcf=output_dir + "/vizaln/{fam}/{fam}.hipstr.vcf.gz",
+        renderer=workflow.source_path("../scripts/render_hipstr_viz.py")
     output: 
         report(
             output_dir + "/vizaln/{fam}/hipstr/variants/{chr}_{pos}.html",
@@ -169,9 +175,10 @@ rule vizaln:
         )
     benchmark:
         output_dir +"/benchmark/vizaln/{fam}_hipstr.{chr}_{pos}.tsv"
-    singularity: config.get("containers", {}).get("hipstr", "docker://cgrlab/hipstr:latest")
+    singularity: tc_container("hipstr", "docker://cgrlab/hipstr:latest")
     shell: """
-        VizAln_rev {input.viz} {output} {wildcards.chr} {wildcards.pos}
+        python3 {input.renderer:q} --vcf {input.vcf:q} --alignments {input.viz:q} \
+            --output {output:q} --chrom {wildcards.chr:q} --vcf-pos {wildcards.pos:q}
     """
 
 def aggregate_input(wildcards):
@@ -182,6 +189,7 @@ def aggregate_input(wildcards):
 
 
 rule aggregate_visaln:
+    container: tc_container("utility")
     input: aggregate_input
     output: 
         output_dir + "/vizaln/{fam}/hipstr/DONE"

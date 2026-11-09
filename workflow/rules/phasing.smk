@@ -5,12 +5,23 @@ PHASE_WIN = config["phasing"]["window_size"]
 # rules for phase DNMs
 #############################################
 checkpoint scatter_dnms:
+    container: tc_container("utility")
     input: output_dir +"/dnm_vcf/{fam}.dnm.vcf.gz"
     output:
         directory(output_dir + "/phase_DNMs/{fam}/variants")
     shell: """
-        mkdir -p {output}
-        zgrep -v "^#" {input}  | awk -v FS='\\t' -v OFS=':' '{{out="{output}/"$1"_"$2".dnm"; print $1,$2,$4,$5 >out}}'
+        mkdir -p {output:q}
+        zcat {input:q} | awk -v FS='\\t' -v OFS=':' -v outdir={output:q} '
+            !/^#/ && NF {{
+                out = outdir "/" $1 "_" $2 ".dnm"
+                if (out in seen) {{
+                    print $1,$2,$4,$5 >>out
+                }} else {{
+                    print $1,$2,$4,$5 >out
+                    seen[out] = 1
+                }}
+                if (close(out) != 0) exit 1
+            }}'
     """
 
 ### Extract region around each DNM from the VCF file
@@ -23,6 +34,7 @@ rule vcf4phase:
         vcf=output_dir + "/phase_DNMs/{fam}/variants/DV.{chr}_{pos}.vcf.gz",
         tbi=output_dir + "/phase_DNMs/{fam}/variants/DV.{chr}_{pos}.vcf.gz.tbi"
     conda: "../envs/bcftools.yaml"
+    container: tc_container("bcftools")
     benchmark:
         output_dir +"/benchmark/vcf4phase/{fam}.{chr}_{pos}.tsv"
     params: 
@@ -45,6 +57,7 @@ rule phase_child:
         output_dir +"/benchmark/phase_child/{fam}.{chr}_{pos}.tsv"
     threads: config["threads"]["phase_child"]
     conda: "../envs/whatshap.yaml"
+    container: tc_container("whatshap")
     shell: """
         whatshap phase -o {output.vcf} --tag=PS --indels --reference={input.ref} --sample {params.id} {input.vcf} {input.bams}
     """
@@ -61,12 +74,14 @@ rule phase_trios:
         output_dir +"/benchmark/phase_trios/{fam}.{chr}_{pos}.tsv"
     threads: config["threads"]["phase_trios"]
     conda: "../envs/whatshap.yaml"
+    container: tc_container("whatshap")
     shell: """
         whatshap phase -o {output.vcf} --tag=PS --indels --ped {input.ped} --reference={input.ref} {input.vcf} {input.bams} 
     """
 
 
 rule extract_parental_origin:
+    container: tc_container("utility")
     input:
         dnm = output_dir + "/phase_DNMs/{fam}/variants/{chr}_{pos}.dnm",
         ped = ped_dir + "/{fam}.ped",
@@ -91,6 +106,7 @@ def aggregate_input(wildcards):
 
 ### should be replace "_" with ":" after VID is fixed
 rule aggregate_phase:
+    container: tc_container("utility")
     input: aggregate_input
     output: 
         report(
@@ -105,7 +121,13 @@ rule aggregate_phase:
             }
         )
     shell: """
-        ( echo -e "VariantID\tParentalOrigin\tPhase\tHaplotypeBlockSize\t InformativeSiteCnt\tFM_count\tMF_count\tFM_status\tParentOriginChange" && cat {input} | sort -t ":"  -Vs -k1,1 -k2,2n ) > {output}
+        (
+            printf 'VariantID\\tParentalOrigin\\tPhase\\tHaplotypeBlockSize\\t InformativeSiteCnt\\tFM_count\\tMF_count\\tFM_status\\tParentOriginChange\\n'
+            set -- {input:q}
+            if [ "$#" -gt 0 ]; then
+                cat -- "$@" | sort -t ":" -Vs -k1,1 -k2,2n
+            fi
+        ) > {output:q}
     """
 
 optional_output.append(expand(output_dir + "/phase_DNMs/{fam}.parental_origin.tab", fam=fam_ids))
