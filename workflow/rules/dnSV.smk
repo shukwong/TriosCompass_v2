@@ -1,5 +1,7 @@
 # call de novo SV using manta+GraphTyper2 and smoove
-EXCLUDE_BED=config["dnSV"]["GraphTyper2+smoove"]["exclude_bed"]
+EXCLUDE_BED = config["dnSV"].get("exclude_bed") or config["dnSV"].get("GraphTyper2+smoove", {}).get("exclude_bed")
+if not EXCLUDE_BED:
+    raise ValueError("Set dnSV.exclude_bed (or the legacy GraphTyper2+smoove.exclude_bed)")
 SV_CALLERS=["smoove", "gt2"]
 
 rule manta_create_run_script:
@@ -11,7 +13,7 @@ rule manta_create_run_script:
         output_dir + '/manta/{subj}/runWorkflow.py.config.pickle'
     params:
         prefix = output_dir + '/manta/{subj}'
-    singularity: 'docker://szarate/manta:v1.6.0'
+    singularity: tc_container("manta", "docker://szarate/manta:v1.6.0")
     shell:
         'configManta.py \
             --bam {input.bam} \
@@ -29,7 +31,7 @@ rule manta_call:
     threads: config["threads"]["manta_call"]
     benchmark:
         "benchmarks/manta_call/{sample}.tsv"
-    singularity: 'docker://szarate/manta:v1.6.0'
+    singularity: tc_container("manta", "docker://szarate/manta:v1.6.0")
     shell:
         '{input.cmd} -m local -j {threads}'
 
@@ -42,6 +44,7 @@ rule uniq_svid:
         tbi = output_dir + "/manta_sv/{sample}.vcf.gz.tbi"
     threads: config["threads"]["uniq_svid"]
     conda: "../envs/bcftools.yaml"
+    container: tc_container("bcftools")
     shell: """
         bcftools annotate --threads {threads} -I '{wildcards.sample}:%ID' {input} -Oz -o {output.gz}
         tabix -p vcf {output.gz}
@@ -49,6 +52,7 @@ rule uniq_svid:
 
 ### make manta output list in the order: father, mother and child (the same order as the samples listed in the ped file)
 rule trio_manta_list:
+    container: tc_container("utility")
     input: 
         vcfs=lambda w: expand(output_dir + "/manta_sv/{id}.vcf.gz", id= [person.id for person in families[w.fam]])
     output: 
@@ -71,7 +75,7 @@ rule svimmer:
         "benchmarks/svimmer/{fam}.tsv"
     # params: 
     #     cmd = workflow.basedir + "/scripts/svimmer"
-    singularity: "docker://bioinformatics/svimmer:latest"
+    container: tc_container("svimmer", "docker://bioinformatics/svimmer:latest")
     shell: """
         svimmer {input} chr{{1..22}} --ids --max_distance 50 --max_size_difference 100  --output {output.vcf}
     """
@@ -82,6 +86,7 @@ rule vcfgz:
         vcf = output_dir + "/svimmer/{fam}.merged.vcf.gz",
         tbi = output_dir + "/svimmer/{fam}.merged.vcf.gz.tbi"
     conda: "../envs/tabix.yaml"
+    container: tc_container("tabix")
     shell: """
         bgzip -c {input} > {output.vcf}
         tabix -p vcf {output.vcf}
@@ -101,14 +106,17 @@ rule graphtyper:
     benchmark:
         "benchmarks/graphtyper/{fam}.tsv"
     conda: "../envs/graphtyper.yaml"
+    container: tc_container("graphtyper")
     params: 
-        prefix = output_dir + "/graphtyper/{fam}"
+        prefix = output_dir + "/graphtyper/{fam}",
+        workers=lambda w, threads: max(1, threads // 2),
+        worker_threads=lambda w, threads: min(2, threads)
     shell: """
         # ls {input.bams} > {output.bam_lst}
         # To keep the sample in the order:father, mother, child
         echo {input.bams} | tr ' ' '\\n' > {output.bam_lst}
 
-        seq 1 22 | sed -e "s/^/chr/" | parallel  'graphtyper genotype_sv {input.ref} {input.vcf} --sams={output.bam_lst} --threads=2 --region={{}} --output={params.prefix}'
+        seq 1 22 | sed -e "s/^/chr/" | parallel --jobs {params.workers} 'graphtyper genotype_sv {input.ref} {input.vcf} --sams={output.bam_lst} --threads={params.worker_threads} --region={{}} --output={params.prefix}'
 
         echo chr{{1..22}} | tr ' ' '\\n' | while read chrom; do if [[ ! -d {params.prefix}/${{chrom}} ]]; then continue; fi; find {params.prefix}/${{chrom}} -name "*.vcf.gz" | sort; done > {output.vcf_lst}
 
@@ -128,6 +136,7 @@ rule graphtyper_filter:
     benchmark:
         "benchmarks/graphtyper_filter/{fam}.tsv"
     conda: "../envs/vcflib.yaml"
+    container: tc_container("vcflib")
     shell: """
         vcffilter -f "( SVTYPE = BND & SVMODEL = AGGREGATED & QD > 20 & ( ABHet > 0.30 | ABHet < 0 ) & ( AC / NUM_MERGED_SVS ) < 10 & PASS_AC > 0 & PASS_ratio > 0.1 ) | ( SVTYPE = DEL & SVMODEL = AGGREGATED & QD > 12 & ( ABHet > 0.30 | ABHet < 0 ) & ( AC / NUM_MERGED_SVS ) < 25 & PASS_AC > 0 & PASS_ratio > 0.1 ) | ( SVTYPE = DUP & SVMODEL = AGGREGATED & QD > 5 & PASS_AC > 0 & ( AC / NUM_MERGED_SVS ) < 25 ) | ( SVTYPE = INS & SVMODEL = AGGREGATED & PASS_AC > 0 & ( AC / NUM_MERGED_SVS ) < 25 & PASS_ratio > 0.1 & ( ABHet > 0.25 | ABHet < 0 ) & MaxAAS > 4 ) | ( SVTYPE = INV & PASS_AC > 0 & ( AC / NUM_MERGED_SVS ) < 25 & PASS_ratio > 0.1 & ( ABHet > 0.25 | ABHet < 0 ) & MaxAAS > 4 )"  {input.vcf} | bgzip -c > {output.vcf}
         tabix -p vcf {output.vcf} 
@@ -155,7 +164,7 @@ rule smoove:
     params: 
         prefix = "{fam}",
         out_dir =  output_dir + "/smoove/{fam}"    
-    container: "docker://brentp/smoove"
+    container: tc_container("smoove", "docker://brentp/smoove")
     shell: """
         smoove call -x --name {params.prefix} -o {params.out_dir} --exclude {input.exclude_bed} --fasta  {input.ref} -p {threads} --genotype {input.bams}
     """
@@ -168,6 +177,7 @@ rule call_dnSV:
     output: 
         output_dir + "/dnSV/{fam}.smoove.dnSV.vcf"
     conda: "../envs/bcftools.yaml"
+    container: tc_container("bcftools")
     shell: """
         bcftools view -i 'GT[2]="het" && GT[1]="RR" && GT[0]="RR" ' -O v  {input} -o {output}
     """
@@ -202,12 +212,14 @@ rule joint_dnSV:
         stats = output_dir + "/joint_dnSV/{fam}.dnSV.stats",
         others = multiext(output_dir+ "/joint_dnSV/{fam}.dnSV.stats", "_CHR", "support")
     conda: "../envs/survivor.yaml"
+    container: tc_container("survivor")
     shell: """
         SURVIVOR merge {input} 1000 2 0 0 0 50 {output.vcf}
         SURVIVOR stats {output.vcf} 50 -1 -1 {output.stats}
     """
 
 rule dnSV_summary:
+    container: tc_container("utility")
     input: expand(output_dir + "/joint_dnSV/{fam}.dnSV.vcf", fam=fam_ids)
     output:
         report(
@@ -220,7 +232,7 @@ rule dnSV_summary:
             }
         )
     shell: """
-        (echo -e "TrioID\tdnSTR_Cnt" && ls {input} | parallel 'id=$(basename {{/}} .dnSV.vcf);cnt=$(zgrep -v -c "^#" {{}} ); echo -e "$id\t$cnt" ')  > {output}
+        (echo -e "TrioID\tdnSTR_Cnt" && ls {input} | parallel --jobs {threads} 'id=$(basename {{/}} .dnSV.vcf);cnt=$(zgrep -v -c "^#" {{}} ); echo -e "$id\t$cnt" ')  > {output}
     """
 
 optional_output.append(expand(output_dir + "/joint_dnSV/{fam}.dnSV.vcf", fam=families))

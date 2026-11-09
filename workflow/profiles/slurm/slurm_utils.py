@@ -165,6 +165,19 @@ def convert_job_properties(job_properties, resource_mapping=None):
         v = None if len(kv) == 1 else kv[1]
         options[k.lstrip("-").replace("_", "-")] = v
 
+    # A rule's gpu resource must result in a scheduler GPU request. Explicit
+    # gres/gpus settings take precedence; preserve any lscratch request.
+    if "gres" in resources:
+        options.setdefault("gres", resources["gres"])
+    gpu_count = int(resources.get("gpu", 0))
+    if gpu_count < 0:
+        raise ValueError("gpu must be nonnegative")
+    if gpu_count and not any(k.startswith("gpus") for k in options):
+        gres = str(options.get("gres", resources.get("gres", "")))
+        if not any(item.startswith("gpu:") or item == "gpu" for item in gres.split(",")):
+            model = resources.get("gpu_model")
+            gpu_spec = f"gpu:{model}:{gpu_count}" if model else f"gpu:{gpu_count}"
+            options["gres"] = ",".join(filter(None, [gres, gpu_spec]))
     return options
 
 

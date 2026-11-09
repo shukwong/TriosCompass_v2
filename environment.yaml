@@ -1,17 +1,19 @@
 name: TriosCompassV2
 channels:
-  - bioconda
   - conda-forge
+  - bioconda
   - defaults
 dependencies:
-  - snakemake==7.8.5
+  - snakemake==7.32.4
+  - pulp<2.8
+  - setuptools==69.1.1  # Snakemake 7 min_version needs pkg_resources
   - snakemake-wrapper-utils
   - pip==22.3.1
-  - python==3.10.6
+  - python=3.11
   # - mamba==1
   # https://github.com/snakemake/snakemake/issues/1899
   - tabulate==0.8.10 
   - pip:
     - eido==0.1.9
     - peds==1.3.2
-    - peppy==0.35.4
+    - peppy==0.40.4

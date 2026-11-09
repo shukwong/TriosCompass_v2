@@ -1,0 +1,4 @@
+SAMPLE_ID,BAM
+child,input/child.bam
+father,input/father.bam
+mother,input/mother.bam

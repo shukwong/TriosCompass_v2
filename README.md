@@ -1074,3 +1074,14 @@ drwxr-s---. 2 zhuw10 DCEG_Trios    4096 Dec 18 09:17 .
 ```
 
 The expected output is also available within the `TriosCompass_test_case.zip` file under the `test_case2/expected_output/` subdirectory.
+
+## Portable v1.1.0 features
+
+RUFUS trio calling, Telomerecat, filtered BAM exports and offline igv-reports
+SV review are available as independent optional branches. This migration also
+repairs GATK normalization, HipSTR output staging, QC execution and workflow
+configuration. See [configuration and migration notes](config/README.md#portable-v110-migration)
+for inputs, resource settings, report semantics and the Snakemake 7 Biowulf profile.
+
+The test workflow uses synthetic trios and mocked external callers; it does not
+run whole-genome calling or require research datasets/GPU access.

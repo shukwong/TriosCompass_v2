@@ -1,0 +1,9 @@
+pep_version: 2.0.0
+sample_table: example_bam.csv
+sample_modifiers:
+  derive:
+    attributes: [sample_name]
+    sources:
+      name: "{SAMPLE_ID}"
+  append:
+    sample_name: name

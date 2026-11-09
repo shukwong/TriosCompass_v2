@@ -7,10 +7,11 @@ rule config_manta_joint_call:
         output_dir + '/manta_joint/{fam}/runWorkflow.py.config.pickle'
     params:
         prefix = output_dir + '/manta_joint/{fam}',
-        bams = lambda w, input: " --bam ".join(input.bams)
-    singularity: 'docker://kfdrc/manta:1.6.0'
+        bams = lambda w, input: " --bam ".join(input.bams),
+        config_command = config["dnSV"]["Manta"].get("config_command", "/manta-1.6.0.centos6_x86_64/bin/configManta.py")
+    singularity: tc_container("manta_joint", "docker://kfdrc/manta:1.6.0")
     shell:
-        '/manta-1.6.0.centos6_x86_64/bin/configManta.py \
+        '{params.config_command:q} \
             --bam {params.bams} \
             --referenceFasta {input.ref} \
             --runDir {params.prefix}'
@@ -26,7 +27,7 @@ rule run_manta_joint_call:
     threads: config["threads"]["manta_call"]
     benchmark:
         "benchmarks/run_manta_joint_call/{fam}.tsv"
-    singularity: 'docker://kfdrc/manta:1.6.0'
+    singularity: tc_container("manta_joint", "docker://kfdrc/manta:1.6.0")
     shell:
         '{input.cmd} -m local -j {threads}'
 
@@ -47,6 +48,7 @@ rule dnSV_manta:
             }
         )
     conda: "../envs/slivar.yaml"
+    container: tc_container("slivar")
     shell: """
         slivar expr  \
             --vcf {input.vcf} \
@@ -62,6 +64,7 @@ rule dnSV_manta:
     """
 
 rule dnSV_manta_summary:
+    container: tc_container("utility")
     input: expand(output_dir + "/dnSV_manta/{fam}.dnSV.manta.vcf", fam=fam_ids)
     output:
         report(
@@ -75,7 +78,7 @@ rule dnSV_manta_summary:
         )
     shell: """
         # BND is counted twice in manta otuput, so we need to divide by 2
-        (echo -e "TrioID\tdnSTR_Cnt" && ls {input} | parallel 'id=$(basename {{/}} .dnSV.manta.vcf);cnt=$(echo $(grep -v -c "^#" {{}}) - $(grep -v "^#" {{}} | grep -c "BND")/2 | bc ); echo -e "$id\t$cnt" ')  > {output}
+        (echo -e "TrioID\tdnSTR_Cnt" && ls {input} | parallel --jobs {threads} 'id=$(basename {{/}} .dnSV.manta.vcf);cnt=$(echo $(grep -v -c "^#" {{}}) - $(grep -v "^#" {{}} | grep -c "BND")/2 | bc ); echo -e "$id\t$cnt" ')  > {output}
     """
 
 optional_output.append(expand(output_dir + "/dnSV_manta/{fam}.dnSV.manta.vcf", fam=fam_ids))

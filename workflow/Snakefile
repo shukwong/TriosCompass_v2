@@ -17,6 +17,7 @@ report: "report/workflow.rst"
 # Using singularity for conda/mamba support
 # container: "docker://condaforge/mambaforge"
 
+include: "rules/runtime.smk"
 include: "rules/common.smk"
 include: "rules/pedigree.smk"
 include: "rules/ref.smk"
@@ -48,14 +49,21 @@ if config["dnSV"]["enable"]:
     if config["dnSV"]["Manta"]["enable"]:
         include: "rules/dnSV_manta.smk"
 
+if config.get("rufus", {}).get("enable", False):
+    include: "rules/dnSV_rufus.smk"
+
+if config.get("igv_reports", {}).get("enable", False):
+    include: "rules/igv_reports.smk"
+
 if config["multiqc"]["enable"]:
     include: "rules/multiqc.smk"
 
-rule all: 
-    input: 
+rule all:
+    default_target: True
+    input:
         output_dir + "/dnm_vcf_summary/DNM_summary.txt",
-        optional_output=optional_output,
-        
-        
+        optional_output=optional_output
 
 
+# Fail closed before execution if a newly added rule bypasses container mode.
+tc_validate_rules(workflow.rules)

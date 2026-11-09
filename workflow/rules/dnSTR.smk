@@ -1,3 +1,5 @@
+import json
+
 ########################################################
 # append rules for dnSTR calling
 ########################################################
@@ -20,6 +22,7 @@ if config["dnSTR"]["hipstr"]["enable"]:
         benchmark:
             output_dir + "/benchmark/dumpstr_call/{caller}_{chunk}.tsv"
         conda: "../envs/trtools.yaml"
+        container: tc_container("trtools")
         # container: "docker://quay.io/biocontainers/trtools:latest"
         shell: """
             mkdir -p $(dirname {params.prefix})	
@@ -30,6 +33,7 @@ if config["dnSTR"]["hipstr"]["enable"]:
         """
 
     rule merge_ped:
+        container: tc_container("utility")
         input:
             expand(ped_dir + "/{fam}.ped", fam=fam_ids)
         output:
@@ -48,6 +52,7 @@ if config["dnSTR"]["hipstr"]["enable"]:
         params:
             prefix = output_dir + "/dumpstr_locus/{caller}_{chunk}"
         conda: "../envs/trtools.yaml"
+        container: tc_container("trtools")
         # container: "docker://quay.io/biocontainers/trtools:latest"
         shell: """
             dumpSTR --min-locus-hwep 0.00001 --min-locus-callrate 0.8 \
@@ -63,6 +68,7 @@ if config["dnSTR"]["hipstr"]["enable"]:
             gz= output_dir + "/dumpstr_locus/{caller}_{chunk}.vcf.gz",
             tbi= output_dir + "/dumpstr_locus/{caller}_{chunk}.vcf.gz.tbi"
         conda: "../envs/bcftools.yaml"
+        container: tc_container("bcftools")
         shell: """
             bcftools sort {input} | bgzip -c  > {output.gz}
             tabix -p vcf {output.gz}
@@ -76,7 +82,7 @@ if config["dnSTR"]["hipstr"]["enable"]:
             multiext( output_dir + "/monstr/{caller}_{chunk}", ".all_mutations.tab", ".locus_summary.tab")
         benchmark:
             output_dir + "/benchmark/monstr/{caller}_{chunk}.tsv"
-        singularity: "docker://gymreklab/monstr"
+        container: tc_container("monstr", "docker://gymreklab/monstr")
         params:
             prefix=output_dir + "/monstr/{caller}_{chunk}",
             arg = lambda w: config["dnSTR"]["hipstr"]["monstr_filter"] if (w.caller=='hipstr') else " ",
@@ -108,6 +114,7 @@ if config["dnSTR"]["hipstr"]["enable"]:
             mutation=output_dir + "/merge_monstr/{caller}.all_mutations.tab",
             summary=output_dir + "/merge_monstr/{caller}.locus_summary.tab"
         conda: "../envs/csvtk.yaml"
+        container: tc_container("csvtk")
         shell: """
             csvtk concat -E -t {input.mutation} | csvtk sort -t -k chrom:N -k pos:n -k child -E - | csvtk filter -t -f "poocase>1" > {output.mutation}
             csvtk concat -E -t {input.summary} | csvtk sort -t -k chrom:N -k pos:n  -E - | csvtk filter -t -f "total_mutations>0" > {output.summary}
@@ -129,7 +136,7 @@ if config["dnSTR"]["hipstr"]["enable"]:
                 }
             ),
             log=output_dir + "/monstr_filter/{caller}.filtered.log"
-        singularity: "docker://gymreklab/monstr"
+        container: tc_container("monstr", "docker://gymreklab/monstr")
         shell: """
             python3 /STRDenovoTools/scripts/qc_denovos.py --all-mutations-file {input} \
                     --filtered-mutations-file {output.filtered} \
@@ -140,18 +147,13 @@ if config["dnSTR"]["hipstr"]["enable"]:
         """
 
     rule childDict2table:
+        container: tc_container("utility")
         output: output_dir + "/dnSTR_summary/childDict.csv"
-        params: dict = CHILD_DICT
-        run: 
-            import csv
-
-            with open(str(output), 'w', newline='') as csvfile:
-                fieldnames = ['child', 'trio_id']
-                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-
-                writer.writeheader()
-                for key in params.dict:
-                    writer.writerow({'trio_id': key, 'child': params.dict[key]})
+        params:
+            mapping=json.dumps(CHILD_DICT),
+            script=os.path.join(workflow.basedir, "scripts", "write_child_table.py")
+        shell:
+            "python3 {params.script:q} {params.mapping:q} {output:q}"
 
     rule dnSTR_summary:
         input: 
@@ -170,6 +172,7 @@ if config["dnSTR"]["hipstr"]["enable"]:
                 }
             )
         conda: "../envs/csvtk.yaml"
+        container: tc_container("csvtk")
         shell: """
             csvtk join -t --na 0 -L -f child <(csvtk csv2tab {input.csv}) <(csvtk summary -t -g child -f pos:countn  {input.tab} | csvtk rename -t -f 1,2 -n child,countn) > {output}
         """

@@ -31,6 +31,7 @@ rule fastp:
     threads: config["threads"]["fastp"]
     conda:
         "../envs/fastp.yaml"
+    container: tc_container("fastp")
     shell: """
         fastp \
                 --in1 {input.R1} \
@@ -48,22 +49,41 @@ rule fastp:
 qc_output.append(expand(output_dir+"/fastp/{sample_name}.json", sample_name = ids))
 
 if config["fastq_input"]["fastqc"]["enable"]:
-    rule fastqc:
-        input: output_dir+"/fastp/{fid}.fastp.fastq.gz"
-        output:
-            html=output_dir+"/fastqc/{fid}.html",
-            zip=output_dir+"/fastqc/{fid}_fastqc.zip" 
-        params:
-            extra = "--quiet"
-        log:
-            "logs/fastqc/{fid}.log"
-        threads: 1
-        resources:
-            mem_mb=10000,
-            runtime=600
-        wrapper:
-            "v2.1.1/bio/fastqc"     
-    
+    if TC_CONTAINER_ONLY or config.get("containers", {}).get("fastqc"):
+        rule fastqc:
+            input: output_dir + "/fastp/{fid}.fastp.fastq.gz"
+            output:
+                html=output_dir + "/fastqc/{fid}.html",
+                zip=output_dir + "/fastqc/{fid}_fastqc.zip"
+            log: "logs/fastqc/{fid}.log"
+            threads: config["fastq_input"]["fastqc"].get("threads", 4)
+            resources: mem_mb=10000, runtime=600
+            container: tc_container("fastqc")
+            shell:
+                """
+                work=$(mktemp -d)
+                trap 'rm -rf -- "$work"' EXIT
+                fastqc --quiet --threads {threads} --outdir "$work" {input:q} > {log:q} 2>&1
+                mv "$work"/*_fastqc.html {output.html:q}
+                mv "$work"/*_fastqc.zip {output.zip:q}
+                """
+    else:
+        rule fastqc:
+            input: output_dir+"/fastp/{fid}.fastp.fastq.gz"
+            output:
+                html=output_dir+"/fastqc/{fid}.html",
+                zip=output_dir+"/fastqc/{fid}_fastqc.zip"
+            params:
+                extra = "--quiet"
+            log:
+                "logs/fastqc/{fid}.log"
+            threads: config["fastq_input"]["fastqc"].get("threads", 4)
+            resources:
+                mem_mb=10000,
+                runtime=600
+            wrapper:
+                config["fastq_input"]["fastqc"].get("wrapper", "v1.3.2/bio/fastqc")
+
     optional_output.append( expand(output_dir+"/fastqc/{id}.{reads}_fastqc.zip", id =ids, reads=['R1','R2']))
     qc_output.append( expand(output_dir+"/fastqc/{id}.{reads}_fastqc.zip", id =ids, reads=['R1','R2']))
 

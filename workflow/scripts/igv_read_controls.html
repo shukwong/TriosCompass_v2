@@ -1,0 +1,95 @@
+<!-- BEGIN TRIO READ CONTROLS -->
+<style>
+#read-controls{position:sticky;top:0;z-index:40;background:#eef5fb;border:1px solid #a8c0d3;border-radius:7px;padding:12px 14px;margin:12px 0;font:14px system-ui,sans-serif;box-shadow:0 2px 5px #0001}
+#read-controls .control-row{display:flex;align-items:center;flex-wrap:wrap;gap:9px;margin:6px 0}
+#read-controls button,#read-controls select{font:inherit;border:1px solid #8aa7ba;background:white;color:#183a50;border-radius:4px;padding:7px 11px;cursor:pointer}
+#read-controls button:hover{background:#dceef9}#read-controls button:disabled{cursor:wait;opacity:.55}
+#read-controls label{display:flex;gap:8px;align-items:center;margin-right:16px}#read-controls input[type=range]{width:140px;display:inline-block}
+#read-panel-label[hidden]{display:none}#read-controls output{min-width:43px;font-variant-numeric:tabular-nums}#read-controls .control-help{font-size:12px;margin:6px 0;color:#334e62}
+#read-control-status{font-size:12px;color:#244f36}#read-control-status.error{color:#a32727}
+</style>
+<section id="read-controls" aria-label="Interactive read controls">
+ <div class="control-row"><strong>Browse the reads</strong><span id="read-control-status" role="status" aria-live="polite">Loading interactive viewer… If this remains visible, download this HTML and open it in Chrome or Firefox; static file previews cannot run the viewer.</span></div>
+ <div class="control-row">
+  <label id="read-panel-label" hidden>Apply to <select id="read-panel"><option value="all">Both breakpoint panels</option><option value="0">Left breakpoint</option><option value="1">Right breakpoint</option></select></label>
+  <button id="read-zoom-in" disabled>Zoom in (+)</button><button id="read-zoom-out" disabled>Zoom out (−)</button>
+  <button id="read-pan-left" disabled>← Pan left</button><button id="read-pan-right" disabled>Pan right →</button>
+  <button id="read-reset" disabled>Reset view</button>
+ </div>
+ <div class="control-row">
+  <label for="read-row-height">Read size <input id="read-row-height" type="range" min="6" max="32" value="__READ_HEIGHT__" step="1" disabled><output id="read-row-value">__READ_HEIGHT__ px</output></label>
+  <label for="read-track-height">Track height <input id="read-track-height" type="range" min="180" max="800" value="__TRACK_HEIGHT__" step="1" disabled><output id="read-track-value">__TRACK_HEIGHT__ px</output></label>
+ </div>
+ <p class="control-help">Zoom changes the genomic span. Read size makes each read thicker or thinner; track height shows more or fewer read rows. Click a read for its details. Drag within a track to pan, or use the buttons. Scroll within each sample to see additional reads. Button navigation stays within the embedded read windows.</p>
+</section>
+<script>
+const readWindowMetadata = __READ_WINDOW_METADATA__;
+const selectedEventMetadata = __EVENT_METADATA__;
+function initReadControls() {
+ if(window.readControls?.initialized) return;
+ const controls=document.getElementById('read-controls');
+ const container=document.getElementById('igvContainer');container.before(controls);
+ const status=document.getElementById('read-control-status');
+ const state=window.readControls={initialized:true,version:1,currentId:'0',busy:false,rowHeight:__READ_HEIGHT__,trackHeight:__TRACK_HEIGHT__,lastError:null,queue:Promise.resolve(),serial:0};
+ function frames(){return igvBrowser.referenceFrameList;}
+ function frameWidth(frame){return frame.bpPerPixel*igvBrowser.calculateViewportWidth(frames().length);}
+ function displaySettings(){
+  state.rowHeight=Number(document.getElementById('read-row-height').value);
+  state.trackHeight=Number(document.getElementById('read-track-height').value);
+  document.getElementById('read-row-value').textContent=state.rowHeight+' px';
+  document.getElementById('read-track-value').textContent=state.trackHeight+' px';
+  for(const tv of igvBrowser.trackViews){if(tv.track.type!=='alignment') continue;
+   const alignment=tv.track.alignmentTrack;
+   alignment.alignmentRowHeight=state.rowHeight;
+   alignment.displayMode='EXPANDED';
+   tv.track.autoHeight=false;
+   tv.checkContentHeight();tv.setTrackHeight(state.trackHeight,true);tv.repaintViews();
+  }
+ }
+ function ready(){
+  document.getElementById('event-details').textContent=JSON.stringify(selectedEventMetadata[state.currentId],null,2);
+  const split=frames().length>1;document.getElementById('read-panel-label').hidden=!split;
+  status.classList.remove('error');
+  status.textContent='Live reads ready · '+frames().map((f,i)=>'view '+(i+1)+': '+Math.round(frameWidth(f)).toLocaleString()+' bp').join(' · ');
+ }
+ function busy(value){state.busy=value;for(const el of controls.querySelectorAll('button,input,select')) el.disabled=value;}
+ function enqueue(action){
+  const serial=++state.serial;busy(true);status.textContent='Updating reads…';
+  const work=state.queue.catch(()=>{}).then(action);
+  state.queue=work.then(()=>{if(serial===state.serial){busy(false);ready();}},error=>{state.lastError=String(error);if(serial===state.serial){busy(false);status.classList.add('error');status.textContent='Viewer update failed: '+error.message;}throw error;});
+  state.queue.catch(()=>{});return state.queue;
+ }
+ const originalLoad=igvBrowser.loadSession.bind(igvBrowser);
+ igvBrowser.loadSession=function(config){
+  const id=Object.keys(sessionDictionary).find(k=>sessionDictionary[k]===config.url);
+  return enqueue(async()=>{await originalLoad(config);state.currentId=id??document.querySelector('#variant_table tr.selected')?.dataset.id??'0';document.getElementById('read-panel').value='all';displaySettings();});
+ };
+ function boundedLocus(frame,bounds,scale,shift){
+  const maxWidth=bounds.end-bounds.start;
+  const oldWidth=frameWidth(frame);
+  const width=Math.min(maxWidth,Math.max(20,Math.round(oldWidth*scale)));
+  let start=Math.round(frame.start+oldWidth/2+oldWidth*shift-width/2);
+  start=Math.max(bounds.start,Math.min(start,bounds.end-width));
+  return bounds.chr+':'+(start+1)+'-'+(start+width);
+ }
+ function navigate(scale,shift){return enqueue(async()=>{
+  const data=readWindowMetadata[state.currentId];const fs=frames();
+  if(fs.length!==data.bounds.length){await igvBrowser.search(data.initialLocus);return;}
+  const target=document.getElementById('read-panel').value;
+  const loci=fs.map((f,i)=>boundedLocus(f,data.bounds[i],target==='all'||target===String(i)?scale:1,target==='all'||target===String(i)?shift:0));
+  await igvBrowser.search(loci.join(' '));displaySettings();
+ });}
+ function eventAction(fn){return()=>fn().catch(()=>{});}
+ document.getElementById('read-zoom-in').onclick=eventAction(()=>navigate(.5,0));
+ document.getElementById('read-zoom-out').onclick=eventAction(()=>navigate(2,0));
+ document.getElementById('read-pan-left').onclick=eventAction(()=>navigate(1,-.5));
+ document.getElementById('read-pan-right').onclick=eventAction(()=>navigate(1,.5));
+ document.getElementById('read-reset').onclick=eventAction(()=>enqueue(async()=>{await igvBrowser.search(readWindowMetadata[state.currentId].initialLocus);displaySettings();}));
+ let pending=false;
+ const resize=()=>{if(pending)return;pending=true;requestAnimationFrame(()=>{pending=false;displaySettings();});};
+ document.getElementById('read-row-height').addEventListener('input',resize);
+ document.getElementById('read-track-height').addEventListener('input',resize);
+ state.refresh=displaySettings;state.navigate=navigate;displaySettings();busy(false);ready();
+}
+</script>
+<!-- END TRIO READ CONTROLS -->
